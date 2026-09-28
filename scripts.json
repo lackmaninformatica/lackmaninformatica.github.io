@@ -1,146 +1,162 @@
 [
-  {
-    "name": "Anydesk",
-    "filename": "Anydesk.txt",
-    "path": "Anydesk.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "Disco 100%",
-    "filename": "Disco 100%.txt",
-    "path": "Disco 100%.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "Executa Windows UPDATE",
-    "filename": "Executa Windows UPDATE.txt",
-    "path": "Executa Windows UPDATE.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "Integridade Windows",
-    "filename": "Integridade Windows.txt",
-    "path": "Integridade Windows.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "Limpeza-Unificada-Segura-Completa",
-    "filename": "Limpeza-Unificada-Segura-Completa.txt",
-    "path": "Limpeza-Unificada-Segura-Completa.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "NICTEAM",
-    "filename": "NICTEAM.txt",
-    "path": "NICTEAM.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "Rede windows 11 libera SMB",
-    "filename": "Rede windows 11 libera SMB.txt",
-    "path": "Rede windows 11 libera SMB.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "Remover Máquina de dominínio",
-    "filename": "Remover Máquina de dominínio.txt",
-    "path": "Remover Máquina de dominínio.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "Remoção Ccleaner",
-    "filename": "Remoção Ccleaner.txt",
-    "path": "Remoção Ccleaner.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "Remoção Chrome",
-    "filename": "Remoção Chrome.txt",
-    "path": "Remoção Chrome.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "Remoção Google Drive",
-    "filename": "Remoção Google Drive.txt",
-    "path": "Remoção Google Drive.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "Remoção Mcafee",
-    "filename": "Remoção Mcafee.txt",
-    "path": "Remoção Mcafee.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "Remoção ONEDRIVE",
-    "filename": "Remoção ONEDRIVE.txt",
-    "path": "Remoção ONEDRIVE.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "Remoção Panda",
-    "filename": "Remoção Panda.txt",
-    "path": "Remoção Panda.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "Reparo menu iniciar",
-    "filename": "Reparo menu iniciar.txt",
-    "path": "Reparo menu iniciar.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "SMB Windows 11 OK",
-    "filename": "SMB Windows 11 OK.txt",
-    "path": "SMB Windows 11 OK.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "Speedtest Server",
-    "filename": "Speedtest Server.txt",
-    "path": "Speedtest Server.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  },
-  {
-    "name": "User - Administrador local",
-    "filename": "User - Administrador local.txt",
-    "path": "User - Administrador local.txt",
-    "type": "Arquivo",
-    "extension": ".txt",
-    "category": ""
-  }
+    {
+        "name":  "Anydesk",
+        "filename":  "Anydesk.txt",
+        "path":  "Anydesk.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "Disco 100%",
+        "filename":  "Disco 100%.txt",
+        "path":  "Disco 100%.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "Executa Windows UPDATE",
+        "filename":  "Executa Windows UPDATE.txt",
+        "path":  "Executa Windows UPDATE.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "Integridade Windows",
+        "filename":  "Integridade Windows.txt",
+        "path":  "Integridade Windows.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "Limpeza-Unificada-Segura-Completa",
+        "filename":  "Limpeza-Unificada-Segura-Completa.txt",
+        "path":  "Limpeza-Unificada-Segura-Completa.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "NICTEAM",
+        "filename":  "NICTEAM.txt",
+        "path":  "NICTEAM.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "Rede windows 11 libera SMB",
+        "filename":  "Rede windows 11 libera SMB.txt",
+        "path":  "Rede windows 11 libera SMB.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "Remover MÃƒÂ¡quina de dominÃƒÂ­nio",
+        "filename":  "Remover MÃƒÂ¡quina de dominÃƒÂ­nio.txt",
+        "path":  "Remover MÃƒÂ¡quina de dominÃƒÂ­nio.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "RemoÃƒÂ§ÃƒÂ£o Ccleaner",
+        "filename":  "RemoÃƒÂ§ÃƒÂ£o Ccleaner.txt",
+        "path":  "RemoÃƒÂ§ÃƒÂ£o Ccleaner.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "RemoÃƒÂ§ÃƒÂ£o Chrome",
+        "filename":  "RemoÃƒÂ§ÃƒÂ£o Chrome.txt",
+        "path":  "RemoÃƒÂ§ÃƒÂ£o Chrome.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "RemoÃƒÂ§ÃƒÂ£o Google Drive",
+        "filename":  "RemoÃƒÂ§ÃƒÂ£o Google Drive.txt",
+        "path":  "RemoÃƒÂ§ÃƒÂ£o Google Drive.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "RemoÃƒÂ§ÃƒÂ£o Mcafee",
+        "filename":  "RemoÃƒÂ§ÃƒÂ£o Mcafee.txt",
+        "path":  "RemoÃƒÂ§ÃƒÂ£o Mcafee.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "RemoÃƒÂ§ÃƒÂ£o ONEDRIVE",
+        "filename":  "RemoÃƒÂ§ÃƒÂ£o ONEDRIVE.txt",
+        "path":  "RemoÃƒÂ§ÃƒÂ£o ONEDRIVE.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "RemoÃƒÂ§ÃƒÂ£o Panda",
+        "filename":  "RemoÃƒÂ§ÃƒÂ£o Panda.txt",
+        "path":  "RemoÃƒÂ§ÃƒÂ£o Panda.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "Reparo menu iniciar",
+        "filename":  "Reparo menu iniciar.txt",
+        "path":  "Reparo menu iniciar.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "SMB Windows 11 OK",
+        "filename":  "SMB Windows 11 OK.txt",
+        "path":  "SMB Windows 11 OK.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "Speedtest Server",
+        "filename":  "Speedtest Server.txt",
+        "path":  "Speedtest Server.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "User - Administrador local",
+        "filename":  "User - Administrador local.txt",
+        "path":  "User - Administrador local.txt",
+        "type":  "Arquivo",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "Resync - DomÃ­nio",
+        "filename":  "Resync - DomÃ­nio.txt",
+        "path":  "Resync - DomÃ­nio.txt",
+        "type":  "PowerShell",
+        "extension":  ".txt",
+        "category":  ""
+    },
+    {
+        "name":  "Resync - Domínio",
+        "filename":  "Resync - Domínio.txt",
+        "path":  "Resync - Domínio.txt",
+        "type":  "PowerShell",
+        "extension":  ".txt",
+        "category":  ""
+    }
 ]

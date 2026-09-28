@@ -1,0 +1,14 @@
+Write-Host "=== REDESCOBRINDO A FONTE DE TEMPO / DOMINIO ===" -ForegroundColor Cyan
+w32tm /resync /rediscover
+
+Write-Host "`n=== FORCANDO NOVA SINCRONIZACAO DE HORARIO ===" -ForegroundColor Cyan
+w32tm /resync /force
+
+Write-Host "`n=== ATUALIZANDO POLITICAS DE GRUPO ===" -ForegroundColor Cyan
+gpupdate /force
+
+Write-Host "`n=== RESULTADO DA FONTE DE HORARIO ===" -ForegroundColor Cyan
+w32tm /query /source
+
+Write-Host "`n=== STATUS DA SINCRONIZACAO ===" -ForegroundColor Cyan
+w32tm /query /status
