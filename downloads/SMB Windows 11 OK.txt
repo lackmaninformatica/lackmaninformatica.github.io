@@ -1,0 +1,15 @@
+Abra Power Shell como Administrador
+
+cole esta linha
+
+Set-SmbClientConfiguration -RequireSecuritySignature $false
+
+Digite A (todos)
+
+cole esta outra linha
+
+Set-SmbClientConfiguration -EnableInsecureGuestLogons $true
+
+todos
+
+feito problemas resolvido

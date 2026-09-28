@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Central de Suporte Lackman Informática. Ferramentas e recursos para suporte técnico.">
+  <title>Central de Suporte | Lackman Informática</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="downloads.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#content">Ir para conteúdo</a>
+  <div class="page">
+    <header class="intro">
+      <div class="brand-mark" aria-hidden="true">L<span>.</span></div>
+      <p class="brand">LACKMAN INFORMÁTICA</p>
+      <h1>Central de Suporte</h1>
+      <p class="subtitle">Ferramentas e recursos para suporte técnico.</p>
+    </header>
+    <main id="content">
+      <nav id="home" aria-label="Áreas da Central de Suporte">
+        <ul class="tools main-options">
+          <li><a class="tool navigation-card" href="#downloads"><span class="file-icon" aria-hidden="true">↓</span><h2>Downloads</h2><p>Programas e ferramentas</p></a></li>
+          <li><a class="tool navigation-card" href="#scripts"><span class="file-icon" aria-hidden="true">&gt;_</span><h2>Scripts</h2><p>Scripts para suporte técnico</p></a></li>
+          <li><a class="tool navigation-card" href="#openspeedtest"><span class="file-icon" aria-hidden="true">↗</span><h2>OpenSpeedTest</h2><p>Teste de velocidade</p></a></li>
+        </ul>
+      </nav>
+      <section id="downloads" class="support-section" aria-labelledby="downloads-title" hidden>
+        <a class="back-link" href="#home">← Central de Suporte</a>
+        <div class="section-heading"><h2 id="downloads-title" tabindex="-1">Downloads</h2></div>
+        <p class="section-description">Programas e ferramentas para suporte técnico.</p>
+        <ul class="tools" aria-label="Programas disponíveis para download">
+          <li class="tool remote-card">
+            <span class="file-icon" aria-hidden="true">↔</span>
+            <h3>WireGuard</h3>
+            <p>VPN rápida e segura para conexões remotas.</p>
+            <a class="download" href="https://www.wireguard.com/install/" target="_blank" rel="noopener noreferrer">↗ Baixar no site oficial</a>
+          </li>
+          <li class="tool remote-card">
+            <span class="file-icon" aria-hidden="true">↔</span>
+            <h3>HopToDesk</h3>
+            <p>Suporte remoto para acesso ao computador.</p>
+            <a class="download" href="https://dl.hoptodesk.com/HopToDesk64.exe" target="_blank" rel="noopener noreferrer">↓ Baixar para Windows</a>
+            <a class="official-link" href="https://www.hoptodesk.com/" target="_blank" rel="noopener noreferrer">Site oficial do HopToDesk</a>
+          </li>
+        </ul>
+      </section>
+      <section id="scripts" class="support-section" aria-labelledby="scripts-title" hidden>
+        <a class="back-link" href="#home">← Central de Suporte</a>
+        <div class="section-heading"><h2 id="scripts-title" tabindex="-1">Scripts</h2><span>Scripts para suporte técnico</span></div>
+        <ul class="tools" id="tools" aria-live="polite"></ul>
+      </section>
+      <section id="openspeedtest" class="support-section" aria-labelledby="openspeedtest-title" hidden>
+        <a class="back-link" href="#home">← Central de Suporte</a>
+        <div class="section-heading"><h2 id="openspeedtest-title" tabindex="-1">OpenSpeedTest</h2></div>
+        <p class="section-description">Teste a velocidade da conexão com este servidor.</p>
+        <iframe id="speedtest-frame" title="Teste de velocidade OpenSpeedTest" loading="lazy"></iframe>
+        <a id="speedtest-link" class="official-link" target="_blank" rel="noopener noreferrer">Abrir OpenSpeedTest em nova aba</a>
+      </section>
+      <noscript><p>Ative o JavaScript para navegar pelas seções e visualizar os scripts.</p></noscript>
+    </main>
+    <footer><span>Lackman Informática <span class="separator" aria-hidden="true">/</span> Suporte Técnico</span><span id="year"></span></footer>
+  </div>
+</body>
+</html>

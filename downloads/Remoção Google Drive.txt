@@ -1,0 +1,331 @@
+#requires -RunAsAdministrator
+
+$ErrorActionPreference = "SilentlyContinue"
+
+Write-Host ""
+Write-Host "==============================================" -ForegroundColor Cyan
+Write-Host " REMOCAO COMPLETA DO GOOGLE DRIVE" -ForegroundColor Cyan
+Write-Host "==============================================" -ForegroundColor Cyan
+Write-Host ""
+
+# ------------------------------------------------------------
+# 1. Encerrar processos
+# ------------------------------------------------------------
+
+Write-Host "[1/9] Encerrando processos..." -ForegroundColor Yellow
+
+$processos = @(
+    "GoogleDriveFS",
+    "GoogleDrive",
+    "GoogleDriveSync",
+    "googledrivesync",
+    "GoogleUpdate",
+    "GoogleCrashHandler",
+    "GoogleCrashHandler64",
+    "crashpad_handler"
+)
+
+foreach ($processo in $processos) {
+    Get-Process -Name $processo -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+}
+
+Start-Sleep -Seconds 2
+
+# ------------------------------------------------------------
+# 2. Parar e remover serviços
+# ------------------------------------------------------------
+
+Write-Host "[2/9] Removendo servicos..." -ForegroundColor Yellow
+
+$servicos = Get-CimInstance Win32_Service |
+    Where-Object {
+        $_.Name -match "GoogleDrive|GoogleUpdater|gupdate|gupdatem" -or
+        $_.DisplayName -match "Google Drive|Google Updater"
+    }
+
+foreach ($servico in $servicos) {
+    Write-Host "Removendo servico: $($servico.Name)"
+
+    Stop-Service -Name $servico.Name -Force -ErrorAction SilentlyContinue
+    sc.exe delete $servico.Name | Out-Null
+}
+
+# ------------------------------------------------------------
+# 3. Localizar e executar desinstaladores
+# ------------------------------------------------------------
+
+Write-Host "[3/9] Executando desinstaladores encontrados..." -ForegroundColor Yellow
+
+$desinstaladores = @(
+    "$env:ProgramFiles\Google\Drive File Stream\*\uninstall.exe",
+    "${env:ProgramFiles(x86)}\Google\Drive File Stream\*\uninstall.exe",
+    "$env:LOCALAPPDATA\Google\DriveFS\*\uninstall.exe",
+    "$env:ProgramFiles\Google\Drive File Stream\launch.bat",
+    "${env:ProgramFiles(x86)}\Google\Drive File Stream\launch.bat"
+)
+
+foreach ($padrao in $desinstaladores) {
+    Get-Item $padrao -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending |
+        ForEach-Object {
+            Write-Host "Executando: $($_.FullName)"
+
+            Start-Process `
+                -FilePath $_.FullName `
+                -ArgumentList "--silent --force_stop" `
+                -Wait `
+                -WindowStyle Hidden `
+                -ErrorAction SilentlyContinue
+        }
+}
+
+# ------------------------------------------------------------
+# 4. Desinstalação pelo registro
+# ------------------------------------------------------------
+
+Write-Host "[4/9] Verificando instalacoes registradas..." -ForegroundColor Yellow
+
+$chavesDesinstalacao = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+)
+
+$aplicativos = foreach ($chave in $chavesDesinstalacao) {
+    Get-ItemProperty $chave -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.DisplayName -match "^Google Drive|Drive for desktop|Google Drive File Stream"
+        }
+}
+
+foreach ($aplicativo in $aplicativos) {
+    Write-Host "Encontrado: $($aplicativo.DisplayName)"
+
+    $comando = $aplicativo.QuietUninstallString
+
+    if (-not $comando) {
+        $comando = $aplicativo.UninstallString
+    }
+
+    if ([string]::IsNullOrWhiteSpace($comando)) {
+        continue
+    }
+
+    if ($comando -match "(?i)msiexec") {
+        $argumentos = $comando -replace '(?i).*?msiexec(?:\.exe)?\s*', ''
+        $argumentos = $argumentos -replace '(?i)/I', '/X'
+
+        Start-Process `
+            -FilePath "msiexec.exe" `
+            -ArgumentList "$argumentos /qn /norestart" `
+            -Wait `
+            -WindowStyle Hidden `
+            -ErrorAction SilentlyContinue
+    }
+    else {
+        Start-Process `
+            -FilePath "cmd.exe" `
+            -ArgumentList "/c `"$comando --silent --force_stop`"" `
+            -Wait `
+            -WindowStyle Hidden `
+            -ErrorAction SilentlyContinue
+    }
+}
+
+# Tentativa adicional pelo Winget
+if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
+    winget uninstall `
+        --name "Google Drive" `
+        --silent `
+        --accept-source-agreements `
+        --disable-interactivity 2>$null
+}
+
+# ------------------------------------------------------------
+# 5. Remover tarefas agendadas
+# ------------------------------------------------------------
+
+Write-Host "[5/9] Removendo tarefas agendadas..." -ForegroundColor Yellow
+
+Get-ScheduledTask -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.TaskName -match "GoogleDrive|GoogleUpdater|GoogleUpdate" -or
+        $_.TaskPath -match "Google"
+    } |
+    Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
+
+# ------------------------------------------------------------
+# 6. Remover pastas do programa
+# ------------------------------------------------------------
+
+Write-Host "[6/9] Removendo pastas do programa..." -ForegroundColor Yellow
+
+$pastasSistema = @(
+    "$env:ProgramFiles\Google\Drive File Stream",
+    "${env:ProgramFiles(x86)}\Google\Drive File Stream",
+    "$env:ProgramFiles\Google\Drive",
+    "${env:ProgramFiles(x86)}\Google\Drive",
+    "$env:ProgramData\Google\DriveFS",
+    "$env:ProgramData\Google\Drive",
+    "$env:ProgramData\Google\Drive File Stream"
+)
+
+foreach ($pasta in $pastasSistema) {
+    if (Test-Path $pasta) {
+        Write-Host "Excluindo: $pasta"
+
+        takeown.exe /F "$pasta" /R /D Y | Out-Null
+        icacls.exe "$pasta" /grant "*S-1-5-32-544:(OI)(CI)F" /T /C | Out-Null
+        Remove-Item $pasta -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# ------------------------------------------------------------
+# 7. Limpar configurações de todos os usuários
+# ------------------------------------------------------------
+
+Write-Host "[7/9] Limpando perfis de usuarios..." -ForegroundColor Yellow
+
+$perfis = Get-CimInstance Win32_UserProfile |
+    Where-Object {
+        $_.LocalPath -and
+        -not $_.Special -and
+        (Test-Path $_.LocalPath)
+    }
+
+foreach ($perfil in $perfis) {
+    $usuario = $perfil.LocalPath
+
+    $pastasUsuario = @(
+        "$usuario\AppData\Local\Google\DriveFS",
+        "$usuario\AppData\Local\Google\Drive",
+        "$usuario\AppData\Local\Google\Drive File Stream",
+        "$usuario\AppData\Roaming\Google\DriveFS",
+        "$usuario\AppData\Roaming\Google\Drive",
+        "$usuario\AppData\Roaming\Google\Drive File Stream"
+    )
+
+    foreach ($pasta in $pastasUsuario) {
+        if (Test-Path $pasta) {
+            Write-Host "Excluindo configuracao: $pasta"
+            Remove-Item $pasta -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    $atalhos = @(
+        "$usuario\Desktop\Google Drive.lnk",
+        "$usuario\Desktop\Google Drive para computador.lnk",
+        "$usuario\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Google Drive.lnk",
+        "$usuario\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Google Drive para computador.lnk",
+        "$usuario\AppData\Roaming\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\Google Drive.lnk"
+    )
+
+    foreach ($atalho in $atalhos) {
+        Remove-Item $atalho -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Atalhos públicos
+$atalhosPublicos = @(
+    "$env:PUBLIC\Desktop\Google Drive.lnk",
+    "$env:PUBLIC\Desktop\Google Drive para computador.lnk",
+    "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Google Drive.lnk",
+    "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Google Drive para computador.lnk"
+)
+
+foreach ($atalho in $atalhosPublicos) {
+    Remove-Item $atalho -Force -ErrorAction SilentlyContinue
+}
+
+# ------------------------------------------------------------
+# 8. Limpar registro
+# ------------------------------------------------------------
+
+Write-Host "[8/9] Limpando registro..." -ForegroundColor Yellow
+
+$chavesRegistro = @(
+    "HKLM:\SOFTWARE\Google\DriveFS",
+    "HKLM:\SOFTWARE\Google\Drive",
+    "HKLM:\SOFTWARE\WOW6432Node\Google\DriveFS",
+    "HKLM:\SOFTWARE\WOW6432Node\Google\Drive",
+    "HKCU:\SOFTWARE\Google\DriveFS",
+    "HKCU:\SOFTWARE\Google\Drive",
+    "HKLM:\SOFTWARE\Policies\Google\DriveFS",
+    "HKCU:\SOFTWARE\Policies\Google\DriveFS",
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\GoogleDriveFS.exe",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\GoogleDriveFS.exe"
+)
+
+foreach ($chave in $chavesRegistro) {
+    Remove-Item $chave -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# Remove entradas de inicialização
+$chavesInicializacao = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+)
+
+foreach ($chave in $chavesInicializacao) {
+    if (Test-Path $chave) {
+        $propriedades = Get-ItemProperty $chave
+
+        foreach ($propriedade in $propriedades.PSObject.Properties) {
+            if (
+                $propriedade.Name -match "GoogleDrive|DriveFS" -or
+                [string]$propriedade.Value -match "GoogleDriveFS|Drive File Stream"
+            ) {
+                Remove-ItemProperty `
+                    -Path $chave `
+                    -Name $propriedade.Name `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
+# ------------------------------------------------------------
+# 9. Reiniciar Explorer e verificar resíduos
+# ------------------------------------------------------------
+
+Write-Host "[9/9] Reiniciando o Windows Explorer..." -ForegroundColor Yellow
+
+Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+Start-Process explorer.exe
+
+Write-Host ""
+Write-Host "Verificando residuos..." -ForegroundColor Cyan
+
+$residuos = @(
+    "$env:ProgramFiles\Google\Drive File Stream",
+    "${env:ProgramFiles(x86)}\Google\Drive File Stream",
+    "$env:LOCALAPPDATA\Google\DriveFS",
+    "$env:ProgramData\Google\DriveFS"
+)
+
+$residuoEncontrado = $false
+
+foreach ($residuo in $residuos) {
+    if (Test-Path $residuo) {
+        Write-Host "Ainda existe: $residuo" -ForegroundColor Red
+        $residuoEncontrado = $true
+    }
+}
+
+Write-Host ""
+
+if (-not $residuoEncontrado) {
+    Write-Host "Google Drive removido completamente." -ForegroundColor Green
+}
+else {
+    Write-Host "Existem arquivos bloqueados." -ForegroundColor Yellow
+    Write-Host "Reinicie o computador e execute o script novamente." -ForegroundColor Yellow
+}
+
+Write-Host ""
+Write-Host "Reinicie o computador antes de reinstalar o Google Drive." -ForegroundColor Cyan
+Read-Host "Pressione Enter para encerrar"

@@ -1,0 +1,206 @@
+#requires -RunAsAdministrator
+
+$ErrorActionPreference = "SilentlyContinue"
+
+Write-Host "========================================="
+Write-Host " REMOÇÃO COMPLETA DO PANDA ANTIVÍRUS"
+Write-Host "========================================="
+
+# Cria ponto de restauração, quando disponível
+Checkpoint-Computer `
+    -Description "Antes da remoção do Panda Antivirus" `
+    -RestorePointType "MODIFY_SETTINGS"
+
+# Processos conhecidos do Panda / WatchGuard Endpoint
+$processos = @(
+    "PSANHost",
+    "PSUAMain",
+    "PAVFnSvr",
+    "PavPrSrv",
+    "PavBckPT",
+    "PavSrvX86",
+    "PavSrvX64",
+    "Panda_URL_Filtering",
+    "PandaDevicesAgent",
+    "WAAgent",
+    "WASmartControl",
+    "AgentSvc",
+    "NanoServiceMain"
+)
+
+foreach ($processo in $processos) {
+    Stop-Process -Name $processo -Force -ErrorAction SilentlyContinue
+}
+
+# Para serviços relacionados ao Panda, Cytomic ou WatchGuard Endpoint
+$servicos = Get-CimInstance Win32_Service | Where-Object {
+    $_.Name -match "Panda|PAV|PSAN|PSUA|Cytomic|WatchGuard|WGEP|NanoService" -or
+    $_.DisplayName -match "Panda|Cytomic|WatchGuard Endpoint"
+}
+
+foreach ($servico in $servicos) {
+    Write-Host "Parando serviço: $($servico.DisplayName)"
+    Stop-Service -Name $servico.Name -Force -ErrorAction SilentlyContinue
+}
+
+# Procura desinstaladores registrados no Windows
+$chavesUninstall = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+)
+
+$programas = Get-ItemProperty $chavesUninstall -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.DisplayName -match "Panda|Cytomic|WatchGuard Agent|WatchGuard Endpoint"
+    }
+
+foreach ($programa in $programas) {
+    Write-Host "Desinstalando: $($programa.DisplayName)"
+
+    $comando = $programa.QuietUninstallString
+
+    if (-not $comando) {
+        $comando = $programa.UninstallString
+    }
+
+    if ($comando -match "MsiExec(\.exe)?\s+/I\s*(\{[^}]+\})") {
+        $guid = $Matches[2]
+        Start-Process "msiexec.exe" `
+            -ArgumentList "/x $guid /qn /norestart" `
+            -Wait
+    }
+    elseif ($comando -match "MsiExec(\.exe)?\s+/X\s*(\{[^}]+\})") {
+        $guid = $Matches[2]
+        Start-Process "msiexec.exe" `
+            -ArgumentList "/x $guid /qn /norestart" `
+            -Wait
+    }
+    elseif ($comando) {
+        try {
+            Start-Process "cmd.exe" `
+                -ArgumentList "/c `"$comando`"" `
+                -Wait
+        }
+        catch {
+            Write-Warning "Não foi possível executar: $comando"
+        }
+    }
+}
+
+Start-Sleep -Seconds 5
+
+# Remove serviços restantes
+$servicosRestantes = Get-CimInstance Win32_Service | Where-Object {
+    $_.Name -match "Panda|PAV|PSAN|PSUA|Cytomic|WatchGuard|WGEP|NanoService" -or
+    $_.DisplayName -match "Panda|Cytomic|WatchGuard Endpoint"
+}
+
+foreach ($servico in $servicosRestantes) {
+    Write-Host "Removendo serviço residual: $($servico.Name)"
+    Stop-Service -Name $servico.Name -Force -ErrorAction SilentlyContinue
+    sc.exe delete $servico.Name | Out-Null
+}
+
+# Pastas conhecidas
+$pastas = @(
+    "$env:ProgramFiles\Panda Security",
+    "${env:ProgramFiles(x86)}\Panda Security",
+    "$env:ProgramFiles\Panda Software",
+    "${env:ProgramFiles(x86)}\Panda Software",
+    "$env:ProgramFiles\Cytomic",
+    "${env:ProgramFiles(x86)}\Cytomic",
+    "$env:ProgramFiles\WatchGuard",
+    "${env:ProgramFiles(x86)}\WatchGuard",
+    "$env:ProgramData\Panda Security",
+    "$env:ProgramData\Panda Software",
+    "$env:ProgramData\Cytomic",
+    "$env:ProgramData\WatchGuard",
+    "$env:LOCALAPPDATA\Panda Security",
+    "$env:APPDATA\Panda Security",
+    "$env:TEMP\Panda*"
+)
+
+foreach ($pasta in $pastas) {
+    Get-Item $pasta -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        Write-Host "Removendo pasta: $($_.FullName)"
+
+        takeown.exe /F "$($_.FullName)" /R /D Y | Out-Null
+        icacls.exe "$($_.FullName)" /grant Administrators:F /T /C | Out-Null
+
+        Remove-Item "$($_.FullName)" -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Chaves de registro específicas
+$registros = @(
+    "HKLM:\SOFTWARE\Panda Security",
+    "HKLM:\SOFTWARE\Panda Software",
+    "HKLM:\SOFTWARE\WOW6432Node\Panda Security",
+    "HKLM:\SOFTWARE\WOW6432Node\Panda Software",
+    "HKLM:\SOFTWARE\Cytomic",
+    "HKLM:\SOFTWARE\WOW6432Node\Cytomic",
+    "HKLM:\SOFTWARE\WatchGuard",
+    "HKLM:\SOFTWARE\WOW6432Node\WatchGuard",
+    "HKCU:\SOFTWARE\Panda Security",
+    "HKCU:\SOFTWARE\Panda Software",
+    "HKCU:\SOFTWARE\Cytomic",
+    "HKCU:\SOFTWARE\WatchGuard"
+)
+
+foreach ($registro in $registros) {
+    if (Test-Path $registro) {
+        Write-Host "Removendo registro: $registro"
+        Remove-Item $registro -Recurse -Force
+    }
+}
+
+# Remove tarefas agendadas relacionadas
+Get-ScheduledTask -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.TaskName -match "Panda|Cytomic|WatchGuard" -or
+        $_.TaskPath -match "Panda|Cytomic|WatchGuard"
+    } |
+    ForEach-Object {
+        Write-Host "Removendo tarefa: $($_.TaskName)"
+        Unregister-ScheduledTask `
+            -TaskName $_.TaskName `
+            -TaskPath $_.TaskPath `
+            -Confirm:$false
+    }
+
+# Remove adaptadores/filtros de rede órfãos identificados pelo nome
+Get-NetAdapterBinding -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.DisplayName -match "Panda|Cytomic|WatchGuard"
+    } |
+    ForEach-Object {
+        Disable-NetAdapterBinding `
+            -Name $_.Name `
+            -ComponentID $_.ComponentID `
+            -ErrorAction SilentlyContinue
+    }
+
+# Limpa arquivos temporários
+Remove-Item "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:windir\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
+
+Write-Host ""
+Write-Host "Verificação final:"
+Write-Host ""
+
+$restos = Get-CimInstance Win32_Service | Where-Object {
+    $_.Name -match "Panda|PAV|PSAN|PSUA|Cytomic|WatchGuard|WGEP|NanoService" -or
+    $_.DisplayName -match "Panda|Cytomic|WatchGuard Endpoint"
+}
+
+if ($restos) {
+    Write-Warning "Ainda existem serviços relacionados:"
+    $restos | Select-Object Name, DisplayName, State | Format-Table
+}
+else {
+    Write-Host "Nenhum serviço relacionado ao Panda foi encontrado."
+}
+
+Write-Host ""
+Write-Host "Reinicie o computador para finalizar a remoção."

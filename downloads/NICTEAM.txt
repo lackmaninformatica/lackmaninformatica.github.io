@@ -1,0 +1,14 @@
+New-NetLbfoTeam `
+  -Name "TEAM-SERVIDOR" `
+  -TeamMembers "Ethernet","Ethernet 2" `
+  -TeamingMode SwitchIndependent `
+  -LoadBalancingAlgorithm Dynamic
+
+
+Get-NetLbfoTeam
+Get-NetLbfoTeamMember -Team "TEAM-SERVIDOR"
+
+
+TEAM-SERVIDOR    Up
+Ethernet         Active
+Ethernet 2       Active

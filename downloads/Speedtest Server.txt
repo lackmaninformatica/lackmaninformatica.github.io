@@ -1,0 +1,649 @@
+#requires -RunAsAdministrator
+
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+
+$InstallDir = "C:\OpenSpeedTest"
+$TempDir = Join-Path $env:TEMP "OpenSpeedTest-Instalacao"
+$TaskName = "OpenSpeedTest-AutoStart"
+$FirewallName = "OpenSpeedTest TCP 3000"
+$Port = 3000
+
+Clear-Host
+
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host " INSTALADOR AUTOMATICO DO OPENSPEEDTEST" -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host ""
+
+# ------------------------------------------------------------
+# VERIFICAR SE O POWERSHELL ESTA COMO ADMINISTRADOR
+# ------------------------------------------------------------
+
+$CurrentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$CurrentPrincipal = New-Object Security.Principal.WindowsPrincipal($CurrentIdentity)
+$IsAdministrator = $CurrentPrincipal.IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator
+)
+
+if (-not $IsAdministrator) {
+    Write-Host "ERRO: abra o PowerShell como Administrador." -ForegroundColor Red
+    Read-Host "Pressione ENTER para fechar"
+    exit 1
+}
+
+# ------------------------------------------------------------
+# FUNCAO DE DOWNLOAD
+# ------------------------------------------------------------
+
+function Download-File {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Url,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Destination
+    )
+
+    Write-Host "Baixando:" -ForegroundColor Yellow
+    Write-Host $Url -ForegroundColor DarkGray
+
+    if (Test-Path $Destination) {
+        Remove-Item $Destination -Force
+    }
+
+    $Curl = Get-Command "curl.exe" -ErrorAction SilentlyContinue
+
+    if ($Curl) {
+        & curl.exe `
+            --location `
+            --fail `
+            --silent `
+            --show-error `
+            --retry 5 `
+            --retry-delay 3 `
+            --connect-timeout 30 `
+            --user-agent "Mozilla/5.0" `
+            --output $Destination `
+            $Url
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Falha ao baixar: $Url"
+        }
+    }
+    else {
+        Invoke-WebRequest `
+            -Uri $Url `
+            -OutFile $Destination `
+            -UseBasicParsing `
+            -Headers @{
+                "User-Agent" = "Mozilla/5.0"
+                "Accept"     = "*/*"
+            }
+    }
+
+    if (-not (Test-Path $Destination)) {
+        throw "O arquivo nao foi criado: $Destination"
+    }
+
+    $FileSize = (Get-Item $Destination).Length
+
+    if ($FileSize -lt 1000) {
+        throw "O download ficou incompleto: $Destination"
+    }
+}
+
+try {
+
+    # ------------------------------------------------------------
+    # HABILITAR TLS 1.2
+    # ------------------------------------------------------------
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+    # ------------------------------------------------------------
+    # PARAR INSTALACAO ANTERIOR
+    # ------------------------------------------------------------
+
+    Write-Host "Removendo instalacao anterior..." -ForegroundColor Yellow
+
+    Get-Process "nginx" -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+
+    Start-Sleep -Seconds 2
+
+    Unregister-ScheduledTask `
+        -TaskName $TaskName `
+        -Confirm:$false `
+        -ErrorAction SilentlyContinue
+
+    Remove-NetFirewallRule `
+        -DisplayName $FirewallName `
+        -ErrorAction SilentlyContinue
+
+    if (Test-Path $InstallDir) {
+        Remove-Item $InstallDir -Recurse -Force
+    }
+
+    if (Test-Path $TempDir) {
+        Remove-Item $TempDir -Recurse -Force
+    }
+
+    New-Item `
+        -Path $InstallDir `
+        -ItemType Directory `
+        -Force | Out-Null
+
+    New-Item `
+        -Path $TempDir `
+        -ItemType Directory `
+        -Force | Out-Null
+
+    # ------------------------------------------------------------
+    # DEFINIR CAMINHOS
+    # ------------------------------------------------------------
+
+    $SpeedTestZip = Join-Path $TempDir "OpenSpeedTest.zip"
+    $NginxZip = Join-Path $TempDir "nginx.zip"
+
+    $SpeedTestExtract = Join-Path $TempDir "OpenSpeedTest-Extraido"
+    $NginxExtract = Join-Path $TempDir "Nginx-Extraido"
+
+    # ------------------------------------------------------------
+    # BAIXAR OPENSPEEDTEST
+    # ------------------------------------------------------------
+
+    Write-Host ""
+    Write-Host "Baixando arquivos oficiais do OpenSpeedTest..." -ForegroundColor Cyan
+
+    Download-File `
+        -Url "https://codeload.github.com/openspeedtest/Speed-Test/zip/refs/heads/main" `
+        -Destination $SpeedTestZip
+
+    # ------------------------------------------------------------
+    # LOCALIZAR VERSAO ATUAL DO NGINX
+    # ------------------------------------------------------------
+
+    Write-Host ""
+    Write-Host "Localizando o NGINX para Windows..." -ForegroundColor Cyan
+
+    $NginxVersion = $null
+
+    try {
+        $DownloadPage = Invoke-WebRequest `
+            -Uri "https://nginx.org/en/download.html" `
+            -UseBasicParsing `
+            -Headers @{
+                "User-Agent" = "Mozilla/5.0"
+            }
+
+        $Matches = [regex]::Matches(
+            $DownloadPage.Content,
+            'nginx-(\d+\.\d+\.\d+)\.zip'
+        )
+
+        $Versions = @()
+
+        foreach ($Match in $Matches) {
+            $Versions += $Match.Groups[1].Value
+        }
+
+        $Versions = $Versions |
+            Select-Object -Unique |
+            Sort-Object {
+                [version]$_
+            } -Descending
+
+        $NginxVersion = $Versions | Select-Object -First 1
+    }
+    catch {
+        Write-Host "Nao foi possivel consultar a versao automaticamente." -ForegroundColor Yellow
+    }
+
+    if ([string]::IsNullOrWhiteSpace($NginxVersion)) {
+        $NginxVersion = "1.28.0"
+    }
+
+    $NginxUrl = "https://nginx.org/download/nginx-$NginxVersion.zip"
+
+    Write-Host "Versao do NGINX: $NginxVersion" -ForegroundColor Green
+
+    Download-File `
+        -Url $NginxUrl `
+        -Destination $NginxZip
+
+    # ------------------------------------------------------------
+    # EXTRAIR OS ARQUIVOS
+    # ------------------------------------------------------------
+
+    Write-Host ""
+    Write-Host "Extraindo arquivos..." -ForegroundColor Cyan
+
+    New-Item `
+        -Path $SpeedTestExtract `
+        -ItemType Directory `
+        -Force | Out-Null
+
+    New-Item `
+        -Path $NginxExtract `
+        -ItemType Directory `
+        -Force | Out-Null
+
+    Expand-Archive `
+        -Path $SpeedTestZip `
+        -DestinationPath $SpeedTestExtract `
+        -Force
+
+    Expand-Archive `
+        -Path $NginxZip `
+        -DestinationPath $NginxExtract `
+        -Force
+
+    # ------------------------------------------------------------
+    # LOCALIZAR PASTAS EXTRAIDAS
+    # ------------------------------------------------------------
+
+    $SpeedTestSource = Get-ChildItem `
+        -Path $SpeedTestExtract `
+        -Directory |
+        Select-Object -First 1
+
+    $NginxSource = Get-ChildItem `
+        -Path $NginxExtract `
+        -Directory |
+        Select-Object -First 1
+
+    if (-not $SpeedTestSource) {
+        throw "A pasta do OpenSpeedTest nao foi encontrada."
+    }
+
+    if (-not $NginxSource) {
+        throw "A pasta do NGINX nao foi encontrada."
+    }
+
+    # ------------------------------------------------------------
+    # INSTALAR NGINX
+    # ------------------------------------------------------------
+
+    Write-Host "Instalando o NGINX..." -ForegroundColor Yellow
+
+    Copy-Item `
+        -Path (Join-Path $NginxSource.FullName "*") `
+        -Destination $InstallDir `
+        -Recurse `
+        -Force
+
+    $NginxExe = Join-Path $InstallDir "nginx.exe"
+    $HtmlDir = Join-Path $InstallDir "html"
+    $ConfigDir = Join-Path $InstallDir "conf"
+    $ConfigFile = Join-Path $ConfigDir "nginx.conf"
+
+    if (-not (Test-Path $NginxExe)) {
+        throw "O executavel nginx.exe nao foi encontrado."
+    }
+
+    # ------------------------------------------------------------
+    # COPIAR OPENSPEEDTEST PARA O NGINX
+    # ------------------------------------------------------------
+
+    Write-Host "Instalando o OpenSpeedTest..." -ForegroundColor Yellow
+
+    if (Test-Path $HtmlDir) {
+        Remove-Item `
+            -Path (Join-Path $HtmlDir "*") `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
+    else {
+        New-Item `
+            -Path $HtmlDir `
+            -ItemType Directory `
+            -Force | Out-Null
+    }
+
+    Copy-Item `
+        -Path (Join-Path $SpeedTestSource.FullName "*") `
+        -Destination $HtmlDir `
+        -Recurse `
+        -Force
+
+    $IndexFile = Get-ChildItem `
+        -Path $HtmlDir `
+        -Filter "index.html" `
+        -Recurse |
+        Select-Object -First 1
+
+    if (-not $IndexFile) {
+        throw "O index.html do OpenSpeedTest nao foi encontrado."
+    }
+
+    if ($IndexFile.DirectoryName -ne $HtmlDir) {
+        Write-Host "Ajustando estrutura dos arquivos..." -ForegroundColor Yellow
+
+        $RealSourceDir = $IndexFile.DirectoryName
+
+        $TemporaryHtml = Join-Path $TempDir "HTML-Correto"
+
+        New-Item `
+            -Path $TemporaryHtml `
+            -ItemType Directory `
+            -Force | Out-Null
+
+        Copy-Item `
+            -Path (Join-Path $RealSourceDir "*") `
+            -Destination $TemporaryHtml `
+            -Recurse `
+            -Force
+
+        Remove-Item `
+            -Path (Join-Path $HtmlDir "*") `
+            -Recurse `
+            -Force
+
+        Copy-Item `
+            -Path (Join-Path $TemporaryHtml "*") `
+            -Destination $HtmlDir `
+            -Recurse `
+            -Force
+    }
+
+    if (-not (Test-Path (Join-Path $HtmlDir "index.html"))) {
+        throw "Nao foi possivel posicionar o index.html na pasta HTML."
+    }
+
+    # ------------------------------------------------------------
+    # CONFIGURAR NGINX
+    # ------------------------------------------------------------
+
+    Write-Host "Configurando o servidor na porta $Port..." -ForegroundColor Yellow
+
+    $NginxConfiguration = @'
+worker_processes  1;
+
+events {
+    worker_connections  4096;
+}
+
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+
+    access_log off;
+    error_log logs/error.log;
+
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+
+    keepalive_timeout 65;
+    keepalive_requests 10000;
+
+    client_max_body_size 100m;
+    client_body_buffer_size 128k;
+    client_body_timeout 120s;
+    send_timeout 120s;
+
+    server {
+        listen 3000;
+        server_name _;
+
+        root html;
+        index index.html;
+
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET, POST, HEAD, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "*" always;
+
+        location / {
+            if ($request_method = OPTIONS) {
+                return 204;
+            }
+
+            try_files $uri $uri/ /index.html;
+            error_page 405 =200 $uri;
+        }
+
+        location = /downloading {
+            access_log off;
+            error_page 405 =200 /downloading;
+        }
+
+        location = /upload {
+            access_log off;
+            error_page 405 =200 /upload;
+        }
+    }
+}
+'@
+
+    Set-Content `
+        -Path $ConfigFile `
+        -Value $NginxConfiguration `
+        -Encoding ASCII
+
+    # ------------------------------------------------------------
+    # CRIAR SCRIPT PARA INICIAR
+    # ------------------------------------------------------------
+
+    $StartFile = Join-Path $InstallDir "Iniciar-OpenSpeedTest.cmd"
+
+    $StartContent = @"
+@echo off
+cd /d "$InstallDir"
+
+tasklist /FI "IMAGENAME eq nginx.exe" 2>NUL | find /I "nginx.exe" >NUL
+
+if errorlevel 1 (
+    start "" /min "$NginxExe"
+)
+
+exit /b 0
+"@
+
+    Set-Content `
+        -Path $StartFile `
+        -Value $StartContent `
+        -Encoding ASCII
+
+    # ------------------------------------------------------------
+    # CRIAR SCRIPT PARA PARAR
+    # ------------------------------------------------------------
+
+    $StopFile = Join-Path $InstallDir "Parar-OpenSpeedTest.cmd"
+
+    $StopContent = @"
+@echo off
+cd /d "$InstallDir"
+
+"$NginxExe" -s quit >NUL 2>&1
+
+timeout /t 2 /nobreak >NUL
+
+taskkill /F /IM nginx.exe >NUL 2>&1
+
+exit /b 0
+"@
+
+    Set-Content `
+        -Path $StopFile `
+        -Value $StopContent `
+        -Encoding ASCII
+
+    # ------------------------------------------------------------
+    # TESTAR CONFIGURACAO DO NGINX
+    # ------------------------------------------------------------
+
+    Write-Host "Testando a configuracao..." -ForegroundColor Yellow
+
+    Push-Location $InstallDir
+
+    & $NginxExe -t
+
+    $NginxTestResult = $LASTEXITCODE
+
+    Pop-Location
+
+    if ($NginxTestResult -ne 0) {
+        throw "O teste de configuracao do NGINX apresentou erro."
+    }
+
+    # ------------------------------------------------------------
+    # ABRIR FIREWALL
+    # ------------------------------------------------------------
+
+    Write-Host "Liberando a porta $Port no Firewall..." -ForegroundColor Yellow
+
+    New-NetFirewallRule `
+        -DisplayName $FirewallName `
+        -Description "Servidor local OpenSpeedTest" `
+        -Direction Inbound `
+        -Action Allow `
+        -Protocol TCP `
+        -LocalPort $Port `
+        -Profile Any | Out-Null
+
+    # ------------------------------------------------------------
+    # CRIAR TAREFA DE INICIALIZACAO AUTOMATICA
+    # ------------------------------------------------------------
+
+    Write-Host "Configurando inicio automatico..." -ForegroundColor Yellow
+
+    $TaskAction = New-ScheduledTaskAction `
+        -Execute "cmd.exe" `
+        -Argument "/c `"$StartFile`""
+
+    $TaskTrigger = New-ScheduledTaskTrigger -AtStartup
+
+    $TaskPrincipal = New-ScheduledTaskPrincipal `
+        -UserId "SYSTEM" `
+        -LogonType ServiceAccount `
+        -RunLevel Highest
+
+    $TaskSettings = New-ScheduledTaskSettingsSet `
+        -StartWhenAvailable `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -RestartCount 20 `
+        -RestartInterval (New-TimeSpan -Minutes 1) `
+        -ExecutionTimeLimit (New-TimeSpan -Days 3650)
+
+    Register-ScheduledTask `
+        -TaskName $TaskName `
+        -Action $TaskAction `
+        -Trigger $TaskTrigger `
+        -Principal $TaskPrincipal `
+        -Settings $TaskSettings `
+        -Description "Inicia automaticamente o OpenSpeedTest" `
+        -Force | Out-Null
+
+    # ------------------------------------------------------------
+    # INICIAR AGORA
+    # ------------------------------------------------------------
+
+    Write-Host "Iniciando o OpenSpeedTest..." -ForegroundColor Yellow
+
+    Get-Process "nginx" -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+
+    Start-Sleep -Seconds 1
+
+    Start-Process `
+        -FilePath $NginxExe `
+        -WorkingDirectory $InstallDir `
+        -WindowStyle Hidden
+
+    Start-Sleep -Seconds 5
+
+    # ------------------------------------------------------------
+    # TESTAR PORTA
+    # ------------------------------------------------------------
+
+    $PortTest = Test-NetConnection `
+        -ComputerName "127.0.0.1" `
+        -Port $Port `
+        -WarningAction SilentlyContinue
+
+    $NginxProcesses = Get-Process "nginx" -ErrorAction SilentlyContinue
+
+    $IPv4Addresses = Get-NetIPAddress `
+        -AddressFamily IPv4 `
+        -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.IPAddress -notlike "127.*" -and
+            $_.IPAddress -notlike "169.254.*" -and
+            $_.AddressState -eq "Preferred"
+        }
+
+    $ServerIP = $IPv4Addresses |
+        Sort-Object InterfaceMetric |
+        Select-Object -First 1 -ExpandProperty IPAddress
+
+    # ------------------------------------------------------------
+    # LIMPAR TEMPORARIOS
+    # ------------------------------------------------------------
+
+    Remove-Item `
+        -Path $TempDir `
+        -Recurse `
+        -Force `
+        -ErrorAction SilentlyContinue
+
+    # ------------------------------------------------------------
+    # RESULTADO
+    # ------------------------------------------------------------
+
+    Write-Host ""
+    Write-Host "============================================" -ForegroundColor Green
+    Write-Host " INSTALACAO CONCLUIDA" -ForegroundColor Green
+    Write-Host "============================================" -ForegroundColor Green
+    Write-Host ""
+
+    Write-Host "NGINX executando: " -NoNewline
+    Write-Host ([bool]$NginxProcesses) -ForegroundColor Green
+
+    Write-Host "Porta $Port respondendo: " -NoNewline
+    Write-Host $PortTest.TcpTestSucceeded -ForegroundColor Green
+
+    Write-Host "Pasta da instalacao: $InstallDir"
+    Write-Host "Inicializacao automatica: ATIVADA"
+    Write-Host ""
+
+    if ($ServerIP) {
+        Write-Host "ABRA EM OUTRO COMPUTADOR:" -ForegroundColor Cyan
+        Write-Host "http://${ServerIP}:$Port" -ForegroundColor White
+        Write-Host ""
+    }
+    else {
+        Write-Host "Acesse pelo IP do servidor:" -ForegroundColor Cyan
+        Write-Host "http://IP-DO-SERVIDOR:$Port"
+        Write-Host ""
+    }
+
+    Start-Process "http://localhost:$Port"
+
+    Read-Host "Pressione ENTER para finalizar"
+}
+catch {
+    Write-Host ""
+    Write-Host "============================================" -ForegroundColor Red
+    Write-Host " ERRO NA INSTALACAO" -ForegroundColor Red
+    Write-Host "============================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ""
+
+    if (Test-Path (Join-Path $InstallDir "logs\error.log")) {
+        Write-Host "Ultimas linhas do log do NGINX:" -ForegroundColor Yellow
+
+        Get-Content `
+            -Path (Join-Path $InstallDir "logs\error.log") `
+            -Tail 20 `
+            -ErrorAction SilentlyContinue
+    }
+
+    Write-Host ""
+    Read-Host "Pressione ENTER para finalizar"
+    exit 1
+}

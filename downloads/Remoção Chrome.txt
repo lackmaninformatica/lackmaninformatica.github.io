@@ -1,0 +1,229 @@
+#requires -RunAsAdministrator
+
+$ErrorActionPreference = "SilentlyContinue"
+
+Write-Host "Encerrando processos do Google Chrome..." -ForegroundColor Cyan
+
+$processos = @(
+    "chrome",
+    "googleupdate",
+    "googleupdatem",
+    "googleupdatecore"
+)
+
+foreach ($processo in $processos) {
+    Get-Process -Name $processo -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host "Parando e removendo servicos do Google Update..." -ForegroundColor Cyan
+
+$servicos = @(
+    "gupdate",
+    "gupdatem",
+    "GoogleChromeElevationService"
+)
+
+foreach ($servico in $servicos) {
+    Stop-Service -Name $servico -Force -ErrorAction SilentlyContinue
+
+    if (Get-Service -Name $servico -ErrorAction SilentlyContinue) {
+        sc.exe delete $servico | Out-Null
+    }
+}
+
+Write-Host "Executando os desinstaladores encontrados..." -ForegroundColor Cyan
+
+$desinstaladores = @(
+    "$env:ProgramFiles\Google\Chrome\Application\*\Installer\setup.exe",
+    "${env:ProgramFiles(x86)}\Google\Chrome\Application\*\Installer\setup.exe",
+    "$env:LOCALAPPDATA\Google\Chrome\Application\*\Installer\setup.exe"
+)
+
+foreach ($padrao in $desinstaladores) {
+    Get-Item $padrao -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending |
+        ForEach-Object {
+            Write-Host "Desinstalando por: $($_.FullName)"
+            Start-Process -FilePath $_.FullName `
+                -ArgumentList "--uninstall --multi-install --chrome --system-level --force-uninstall" `
+                -Wait `
+                -WindowStyle Hidden
+        }
+}
+
+Write-Host "Tentando desinstalacao via registro..." -ForegroundColor Cyan
+
+$chavesDesinstalacao = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+)
+
+foreach ($chave in $chavesDesinstalacao) {
+    Get-ItemProperty $chave -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.DisplayName -match "Google Chrome"
+        } |
+        ForEach-Object {
+            $comando = $_.UninstallString
+
+            if ($comando) {
+                Write-Host "Executando: $comando"
+
+                if ($comando -match "msiexec") {
+                    $comandoSilencioso = $comando `
+                        -replace "/I", "/X" `
+                        -replace "/i", "/x"
+
+                    Start-Process "cmd.exe" `
+                        -ArgumentList "/c $comandoSilencioso /qn /norestart" `
+                        -Wait `
+                        -WindowStyle Hidden
+                }
+                else {
+                    Start-Process "cmd.exe" `
+                        -ArgumentList "/c `"$comando`" --force-uninstall" `
+                        -Wait `
+                        -WindowStyle Hidden
+                }
+            }
+        }
+}
+
+Write-Host "Removendo tarefas agendadas do Google..." -ForegroundColor Cyan
+
+Get-ScheduledTask -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.TaskName -match "Google|Chrome"
+    } |
+    Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
+
+Write-Host "Removendo pastas do sistema..." -ForegroundColor Cyan
+
+$pastasSistema = @(
+    "$env:ProgramFiles\Google",
+    "${env:ProgramFiles(x86)}\Google",
+    "$env:ProgramData\Google",
+    "$env:SystemRoot\System32\Tasks\GoogleUpdateTaskMachineCore",
+    "$env:SystemRoot\System32\Tasks\GoogleUpdateTaskMachineUA"
+)
+
+foreach ($pasta in $pastasSistema) {
+    if (Test-Path $pasta) {
+        Takeown.exe /F "$pasta" /R /D Y | Out-Null
+        Icacls.exe "$pasta" /grant Administrators:F /T /C | Out-Null
+        Remove-Item $pasta -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Write-Host "Removendo Chrome de todos os perfis de usuario..." -ForegroundColor Cyan
+
+$perfis = Get-CimInstance Win32_UserProfile |
+    Where-Object {
+        $_.LocalPath -and
+        -not $_.Special
+    }
+
+foreach ($perfil in $perfis) {
+    $caminho = $perfil.LocalPath
+
+    $pastasUsuario = @(
+        "$caminho\AppData\Local\Google\Chrome",
+        "$caminho\AppData\Local\Google\Update",
+        "$caminho\AppData\Local\Google",
+        "$caminho\AppData\Roaming\Google\Chrome",
+        "$caminho\AppData\Roaming\Google"
+    )
+
+    foreach ($pasta in $pastasUsuario) {
+        if (Test-Path $pasta) {
+            Remove-Item $pasta -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    $atalhos = @(
+        "$caminho\Desktop\Google Chrome.lnk",
+        "$caminho\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Google Chrome.lnk",
+        "$caminho\AppData\Roaming\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\Google Chrome.lnk"
+    )
+
+    foreach ($atalho in $atalhos) {
+        Remove-Item $atalho -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Write-Host "Removendo atalhos publicos..." -ForegroundColor Cyan
+
+$atalhosPublicos = @(
+    "$env:PUBLIC\Desktop\Google Chrome.lnk",
+    "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Google Chrome.lnk"
+)
+
+foreach ($atalho in $atalhosPublicos) {
+    Remove-Item $atalho -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host "Limpando chaves de registro..." -ForegroundColor Cyan
+
+$chavesRegistro = @(
+    "HKLM:\SOFTWARE\Google",
+    "HKLM:\SOFTWARE\WOW6432Node\Google",
+    "HKCU:\SOFTWARE\Google",
+    "HKCU:\SOFTWARE\Chromium",
+    "HKLM:\SOFTWARE\Policies\Google",
+    "HKCU:\SOFTWARE\Policies\Google"
+)
+
+foreach ($chave in $chavesRegistro) {
+    Remove-Item $chave -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host "Limpando entradas App Paths..." -ForegroundColor Cyan
+
+$chavesAppPaths = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"
+)
+
+foreach ($chave in $chavesAppPaths) {
+    Remove-Item $chave -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host "Limpando arquivos temporarios relacionados..." -ForegroundColor Cyan
+
+Get-ChildItem "$env:TEMP" -Force -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.Name -match "Chrome|Google"
+    } |
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+Write-Host ""
+Write-Host "Verificando residuos..." -ForegroundColor Yellow
+
+$residuos = @(
+    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+    "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+    "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+)
+
+$encontrado = $false
+
+foreach ($residuo in $residuos) {
+    if (Test-Path $residuo) {
+        Write-Host "Ainda encontrado: $residuo" -ForegroundColor Red
+        $encontrado = $true
+    }
+}
+
+if (-not $encontrado) {
+    Write-Host "Google Chrome removido completamente." -ForegroundColor Green
+}
+else {
+    Write-Host "Ainda existem arquivos bloqueados. Reinicie o computador e execute o script novamente." -ForegroundColor Yellow
+}
+
+Write-Host ""
+Write-Host "Reinicie o computador antes de reinstalar o Chrome." -ForegroundColor Yellow
+Pause

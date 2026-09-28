@@ -1,0 +1,198 @@
+<# 
+Script único: Remove KB5064080 e ajusta políticas SMB/NTLM/Guest.
+Use em PowerShell **como Administrador**.
+
+Fluxo:
+1) Cria ponto de restauração (opcional)
+2) Tenta remover KB5064080 (via WUSA e fallback DISM)
+3) Ajusta serviços SMB, NTLM, convidado, firewall e permissões de sessão
+4) Reinicia automaticamente
+
+ATENÇÃO: algumas configurações reduzem segurança (Guest, NTLM relaxado).
+#>
+
+# =================== CONFIG ===================
+$TargetKB = "KB5064080"
+$CreateRestorePoint = $true
+$AutoReboot = $true
+$LogPath = "C:\Temp\KB-SMB-Fix.log"
+
+# Ajustes SMB/NTLM
+$EnableFirewallRules     = $true
+$AllowInsecureGuest      = $true
+$RelaxNTLM               = $true
+$EnableSMB1Legacy        = $false
+$SetClassicLocalAccounts = $true
+$EnableLinkedConnections = $true
+# ==============================================
+
+function Write-Log {
+    param([string]$Message)
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $line = "[$ts] $Message"
+    Write-Host $line
+    try {
+        New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($LogPath)) -Force | Out-Null
+        Add-Content -Path $LogPath -Value $line
+    } catch {}
+}
+
+function Ensure-Admin {
+    $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).
+        IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $isAdmin) {
+        Write-Host "Elevando privilégios..."
+        Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+        exit
+    }
+}
+
+function Try-CreateRestorePoint {
+    try {
+        Write-Log "Criando ponto de restauração..."
+        Enable-ComputerRestore -Drive "C:\" -ErrorAction SilentlyContinue | Out-Null
+        Checkpoint-Computer -Description "Antes de remover $TargetKB e ajustar SMB" -RestorePointType "MODIFY_SETTINGS"
+        Write-Log "Ponto de Restauração criado."
+    } catch {
+        Write-Log "Falha ao criar ponto de restauração: $($_.Exception.Message)"
+    }
+}
+
+function Is-KBInstalled {
+    param([string]$KB)
+    try {
+        $qfe = Get-CimInstance Win32_QuickFixEngineering -ErrorAction SilentlyContinue |
+            Where-Object { $_.HotFixID -match $KB }
+    } catch { $qfe = $null }
+
+    $dismRaw = (dism /online /Get-Packages) 2>&1 | Out-String
+    $dismMatch = $dismRaw -match $KB
+
+    return ([bool]$qfe -or [bool]$dismMatch)
+}
+
+function Get-PackageIdentityForKB {
+    param([string]$KB)
+    $out = (dism /online /Get-Packages) 2>&1 | Out-String
+    $blocks = ($out -split "(?ms)^\s*$") | Where-Object {$_ -match "Package Identity"}
+    foreach ($b in $blocks) {
+        if ($b -match $KB -and $b -match "State\s*:\s*Installed") {
+            $m = [regex]::Match($b, "Package Identity\s*:\s*(.+)")
+            if ($m.Success) { return $m.Groups[1].Value.Trim() }
+        }
+    }
+    return $null
+}
+
+function Uninstall-With-WUSA {
+    param([string]$KB)
+    Write-Log "Desinstalando $KB via WUSA..."
+    $code = (Start-Process -FilePath "wusa.exe" -ArgumentList "/uninstall /kb:$($KB.TrimStart('K','B')) /quiet /norestart" -PassThru -Wait).ExitCode
+    Write-Log "WUSA saiu com código $code"
+    return $code
+}
+
+function Uninstall-With-DISM {
+    param([string]$PackageIdentity)
+    Write-Log "Desinstalando via DISM PackageName=`"$PackageIdentity`"..."
+    $p = Start-Process -FilePath "dism.exe" -ArgumentList "/Online /Remove-Package /PackageName:`"$PackageIdentity`" /Quiet /NoRestart" -PassThru -Wait
+    $code = $p.ExitCode
+    Write-Log "DISM saiu com código $code"
+    return $code
+}
+
+function Adjust-SMBPolicies {
+    Write-Log "Iniciando ajustes SMB/NTLM/Guest..."
+
+    foreach ($svc in "LanmanServer","LanmanWorkstation") {
+        try {
+            Set-Service -Name $svc -StartupType Automatic -ErrorAction SilentlyContinue
+            if ((Get-Service $svc).Status -ne "Running") { Start-Service $svc }
+        } catch { Write-Log "Falha ao ajustar serviço $svc" }
+    }
+
+    try {
+        Set-SmbServerConfiguration -EnableSMB2Protocol $true -Force | Out-Null
+        Set-SmbClientConfiguration -EnableSecuritySignature $true -RequireSecuritySignature $false -Force | Out-Null
+    } catch {}
+
+    if ($EnableSMB1Legacy) {
+        Write-Log "Habilitando SMB1 (não recomendado)..."
+        Enable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol -NoRestart -All | Out-Null
+        Set-SmbServerConfiguration -EnableSMB1Protocol $true -Force | Out-Null
+    } else {
+        try { Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force | Out-Null } catch {}
+    }
+
+    if ($AllowInsecureGuest) {
+        Write-Log "Permitindo guest inseguros..."
+        try {
+            Set-SmbClientConfiguration -EnableInsecureGuestLogons $true -Force | Out-Null
+        } catch {
+            New-Item -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" -Force | Out-Null
+            New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" -Name "AllowInsecureGuestAuth" -Value 1 -PropertyType DWord -Force | Out-Null
+        }
+    }
+
+    if ($RelaxNTLM) {
+        Write-Log "Relaxando compatibilidade NTLM..."
+        New-Item -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Force | Out-Null
+        New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "LmCompatibilityLevel" -Value 1 -PropertyType DWord -Force | Out-Null
+    }
+
+    if ($SetClassicLocalAccounts) {
+        Write-Log "Modelo clássico para contas locais..."
+        New-Item -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Force | Out-Null
+        New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "ForceGuest" -Value 0 -PropertyType DWord -Force | Out-Null
+    }
+
+    if ($EnableLinkedConnections) {
+        Write-Log "Ativando EnableLinkedConnections..."
+        New-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Force | Out-Null
+        New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "EnableLinkedConnections" -Value 1 -PropertyType DWord -Force | Out-Null
+    }
+
+    if ($EnableFirewallRules) {
+        Write-Log "Abrindo firewall para compartilhamento/descoberta..."
+        try {
+            Set-NetFirewallRule -DisplayGroup "File and Printer Sharing" -Enabled True -Profile Any -ErrorAction SilentlyContinue
+            Set-NetFirewallRule -DisplayGroup "Network Discovery" -Enabled True -Profile Any -ErrorAction SilentlyContinue
+        } catch {}
+    }
+
+    Write-Log "Reiniciando serviços SMB e rede..."
+    try {
+        Restart-Service -Name "LanmanServer","LanmanWorkstation","fdPHost","FDResPub","upnphost","SSDPSRV" -ErrorAction SilentlyContinue
+    } catch {}
+    try {
+        ipconfig /flushdns | Out-Null
+        netsh winsock reset | Out-Null
+        netsh int ip reset | Out-Null
+    } catch {}
+}
+
+# ===== Execução =====
+Ensure-Admin
+Write-Log "Início da rotina"
+
+if ($CreateRestorePoint) { Try-CreateRestorePoint }
+
+if (Is-KBInstalled -KB $TargetKB) {
+    $wusaCode = Uninstall-With-WUSA -KB $TargetKB
+    $successCodes = @(0,3010)
+    if (-not ($successCodes -contains $wusaCode)) {
+        $pkg = Get-PackageIdentityForKB -KB $TargetKB
+        if ($pkg) { Uninstall-With-DISM -PackageIdentity $pkg | Out-Null }
+    }
+} else {
+    Write-Log "$TargetKB não encontrado, seguindo ajustes SMB."
+}
+
+Adjust-SMBPolicies
+
+if ($AutoReboot) {
+    Write-Log "Reiniciando em 15 segundos..."
+    shutdown /r /t 15
+} else {
+    Write-Log "Reinicie manualmente para aplicar todas as mudanças."
+}

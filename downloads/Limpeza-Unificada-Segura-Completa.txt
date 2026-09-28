@@ -1,0 +1,401 @@
+﻿#requires -RunAsAdministrator
+<#
+  Limpeza Unificada Segura - Windows 10/11/Server
+  Remove temporarios, caches recriaveis, lixeira, dumps e cache de download do Windows Update.
+  Tambem executa todas as categorias registradas no recurso Limpeza de Disco do Windows.
+  Nao apaga manualmente Windows Installer, Package Cache, Catroot2, Prefetch ou logs de eventos.
+  Observacao: categorias oficiais da Limpeza de Disco podem remover Windows.old e arquivos de rollback.
+#>
+
+[CmdletBinding()]
+param(
+    [switch]$DryRun,
+    [switch]$AllUsers,
+    [switch]$IncludeBrowserCache,
+    [switch]$IncludeWindowsUpdateCache,
+    [switch]$RunComponentCleanup,
+    [switch]$SkipDiskCleanup
+)
+
+$ErrorActionPreference = 'SilentlyContinue'
+$ProgressPreference = 'SilentlyContinue'
+
+function Format-Bytes([Int64]$Bytes) {
+    if ($Bytes -ge 1TB) { return ('{0:N2} TB' -f ($Bytes / 1TB)) }
+    if ($Bytes -ge 1GB) { return ('{0:N2} GB' -f ($Bytes / 1GB)) }
+    if ($Bytes -ge 1MB) { return ('{0:N2} MB' -f ($Bytes / 1MB)) }
+    if ($Bytes -ge 1KB) { return ('{0:N2} KB' -f ($Bytes / 1KB)) }
+    return "$Bytes B"
+}
+
+function Get-FreeSpace {
+    $device = $env:SystemDrive.TrimEnd('\')
+    $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$device'"
+    if ($disk) { return [Int64]$disk.FreeSpace }
+    return 0L
+}
+
+function Get-ItemSize([string]$LiteralPath) {
+    if (-not (Test-Path -LiteralPath $LiteralPath)) { return 0L }
+    $item = Get-Item -LiteralPath $LiteralPath -Force
+    if (-not $item.PSIsContainer) { return [Int64]$item.Length }
+    $sum = 0L
+    Get-ChildItem -LiteralPath $LiteralPath -Force -Recurse | ForEach-Object {
+        if (-not $_.PSIsContainer) { $sum += [Int64]$_.Length }
+    }
+    return $sum
+}
+
+function Get-ContentSize([string]$Directory) {
+    if (-not (Test-Path -LiteralPath $Directory)) { return 0L }
+    $sum = 0L
+    Get-ChildItem -LiteralPath $Directory -Force | ForEach-Object {
+        $sum += Get-ItemSize $_.FullName
+    }
+    return $sum
+}
+
+$script:Report = [System.Collections.Generic.List[object]]::new()
+$script:MeasuredFreed = 0L
+
+function Add-Result([string]$Item, [Int64]$Before, [Int64]$After, [string]$Status) {
+    $freed = [Math]::Max(0L, ($Before - $After))
+    $script:MeasuredFreed += $freed
+    $script:Report.Add([pscustomobject]@{
+        Item = $Item
+        Liberado = Format-Bytes $freed
+        Bytes = $freed
+        Status = $Status
+    }) | Out-Null
+}
+
+function Clear-DirectorySafe([string]$Directory, [string]$Label) {
+    if (-not (Test-Path -LiteralPath $Directory)) {
+        Add-Result $Label 0 0 'Nao encontrado'
+        return
+    }
+
+    $before = Get-ContentSize $Directory
+    if ($DryRun) {
+        Add-Result $Label $before 0 'Simulacao'
+        return
+    }
+
+    Get-ChildItem -LiteralPath $Directory -Force | Remove-Item -Force -Recurse
+    $after = Get-ContentSize $Directory
+    $status = if ($after -eq 0) { 'Concluido' } elseif ($after -lt $before) { 'Parcial' } else { 'Em uso/sem acesso' }
+    Add-Result $Label $before $after $status
+}
+
+function Remove-PatternSafe([string]$Pattern, [string]$Label) {
+    $items = @(Get-ChildItem -Path $Pattern -Force)
+    if ($items.Count -eq 0) {
+        Add-Result $Label 0 0 'Nao encontrado'
+        return
+    }
+
+    $before = 0L
+    foreach ($item in $items) { $before += Get-ItemSize $item.FullName }
+
+    if ($DryRun) {
+        Add-Result $Label $before 0 'Simulacao'
+        return
+    }
+
+    $items | Remove-Item -Force -Recurse
+    $after = 0L
+    foreach ($item in @(Get-ChildItem -Path $Pattern -Force)) { $after += Get-ItemSize $item.FullName }
+    $status = if ($after -eq 0) { 'Concluido' } elseif ($after -lt $before) { 'Parcial' } else { 'Em uso/sem acesso' }
+    Add-Result $Label $before $after $status
+}
+
+function Get-Profiles {
+    if (-not $AllUsers) { return @([Environment]::GetFolderPath('UserProfile')) }
+
+    return @(Get-CimInstance Win32_UserProfile | Where-Object {
+        -not $_.Special -and $_.LocalPath -like "$env:SystemDrive\Users\*" -and (Test-Path $_.LocalPath)
+    } | Select-Object -ExpandProperty LocalPath -Unique)
+}
+
+function Stop-Browsers {
+    @('chrome','msedge','firefox','brave','opera','opera_gx','iexplore') | ForEach-Object {
+        Stop-Process -Name $_ -Force
+    }
+}
+
+function Invoke-AllDiskCleanupCategories {
+    <#
+      Executa todas as categorias que o proprio Windows disponibiliza em:
+      HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VolumeCaches
+
+      Isso acompanha automaticamente as categorias existentes em cada versao
+      do Windows, como:
+      - Windows Update Cleanup
+      - Arquivos temporarios
+      - Lixeira
+      - Miniaturas
+      - Cache de shaders DirectX
+      - Relatorios e dumps de erros
+      - Delivery Optimization
+      - Instalacoes anteriores do Windows
+      - Arquivos de instalacao/upgrade
+      - Pacotes de drivers antigos
+      - Recursos de idioma nao utilizados
+      - Outras categorias registradas pelo sistema
+
+      ATENCAO:
+      Algumas categorias podem remover Windows.old, arquivos de rollback e
+      arquivos usados para voltar a uma versao anterior do Windows.
+    #>
+
+    $cleanMgr = Join-Path $env:SystemRoot 'System32\cleanmgr.exe'
+    $volumeCaches = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VolumeCaches'
+    $flagName = 'StateFlags0064'
+
+    if (-not (Test-Path -LiteralPath $cleanMgr)) {
+        $script:Report.Add([pscustomobject]@{
+            Item = 'Limpeza de Disco - todas as categorias'
+            Liberado = '0 B'
+            Bytes = 0L
+            Status = 'cleanmgr.exe nao encontrado'
+        }) | Out-Null
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $volumeCaches)) {
+        $script:Report.Add([pscustomobject]@{
+            Item = 'Limpeza de Disco - todas as categorias'
+            Liberado = '0 B'
+            Bytes = 0L
+            Status = 'Categorias nao encontradas'
+        }) | Out-Null
+        return
+    }
+
+    $categories = @(Get-ChildItem -LiteralPath $volumeCaches -ErrorAction SilentlyContinue)
+
+    if ($categories.Count -eq 0) {
+        $script:Report.Add([pscustomobject]@{
+            Item = 'Limpeza de Disco - todas as categorias'
+            Liberado = '0 B'
+            Bytes = 0L
+            Status = 'Nenhuma categoria encontrada'
+        }) | Out-Null
+        return
+    }
+
+    if ($DryRun) {
+        foreach ($category in $categories) {
+            $script:Report.Add([pscustomobject]@{
+                Item = "Limpeza de Disco: $($category.PSChildName)"
+                Liberado = 'Nao calculado'
+                Bytes = 0L
+                Status = 'Disponivel - simulacao'
+            }) | Out-Null
+        }
+        return
+    }
+
+    Write-Host ''
+    Write-Host 'Executando todas as categorias da Limpeza de Disco do Windows...' -ForegroundColor Yellow
+    Write-Host 'Isso pode remover Windows.old e arquivos de retorno para versoes anteriores.' -ForegroundColor Yellow
+
+    $savedValues = @{}
+
+    foreach ($category in $categories) {
+        $key = $category.PSPath
+        $existing = Get-ItemProperty -LiteralPath $key -Name $flagName -ErrorAction SilentlyContinue
+
+        $savedValues[$key] = if ($null -ne $existing) {
+            [pscustomobject]@{ Existed = $true; Value = [int]$existing.$flagName }
+        } else {
+            [pscustomobject]@{ Existed = $false; Value = $null }
+        }
+
+        New-ItemProperty `
+            -LiteralPath $key `
+            -Name $flagName `
+            -PropertyType DWord `
+            -Value 2 `
+            -Force | Out-Null
+    }
+
+    $before = Get-FreeSpace
+    $process = Start-Process `
+        -FilePath $cleanMgr `
+        -ArgumentList '/sagerun:64' `
+        -Wait `
+        -PassThru `
+        -WindowStyle Hidden
+    Start-Sleep -Seconds 3
+    $after = Get-FreeSpace
+    $freed = [Math]::Max(0L, ($after - $before))
+
+    foreach ($key in $savedValues.Keys) {
+        $saved = $savedValues[$key]
+        if ($saved.Existed) {
+            New-ItemProperty `
+                -LiteralPath $key `
+                -Name $flagName `
+                -PropertyType DWord `
+                -Value $saved.Value `
+                -Force | Out-Null
+        } else {
+            Remove-ItemProperty `
+                -LiteralPath $key `
+                -Name $flagName `
+                -Force `
+                -ErrorAction SilentlyContinue
+        }
+    }
+
+    $script:MeasuredFreed += $freed
+    $status = if ($process.ExitCode -eq 0) { 'Concluido' } else { "Finalizado com codigo $($process.ExitCode)" }
+
+    $script:Report.Add([pscustomobject]@{
+        Item = "Limpeza de Disco - $($categories.Count) categorias"
+        Liberado = Format-Bytes $freed
+        Bytes = $freed
+        Status = $status
+    }) | Out-Null
+}
+
+$freeBefore = Get-FreeSpace
+$start = Get-Date
+$logDir = Join-Path $env:SystemDrive 'Temp'
+if (-not $DryRun) {
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    Start-Transcript -Path (Join-Path $logDir 'limpeza_unificada.log') -Append | Out-Null
+}
+
+Write-Host '====================================================' -ForegroundColor Cyan
+Write-Host ' LIMPEZA UNIFICADA SEGURA DO WINDOWS' -ForegroundColor Cyan
+Write-Host '====================================================' -ForegroundColor Cyan
+Write-Host ($(if ($DryRun) { 'MODO: SIMULACAO - nenhum arquivo sera apagado' } else { 'MODO: EXECUCAO' })) -ForegroundColor Yellow
+
+$profiles = Get-Profiles
+
+foreach ($profile in $profiles) {
+    Clear-DirectorySafe "$profile\AppData\Local\Temp" "Temporarios: $profile"
+    Clear-DirectorySafe "$profile\AppData\Local\CrashDumps" "CrashDumps: $profile"
+    Clear-DirectorySafe "$profile\AppData\Local\Microsoft\Windows\INetCache" "Cache Internet: $profile"
+    Clear-DirectorySafe "$profile\AppData\Local\Microsoft\Windows\Explorer" "Miniaturas Explorer: $profile"
+    Clear-DirectorySafe "$profile\AppData\Roaming\Microsoft\Windows\Recent" "Itens recentes: $profile"
+    Remove-PatternSafe "$profile\Downloads\*.tmp" "Arquivos TMP em Downloads: $profile"
+}
+
+if ($IncludeBrowserCache) {
+    Stop-Browsers
+    foreach ($profile in $profiles) {
+        $targets = @(
+            "$profile\AppData\Local\Google\Chrome\User Data\*\Cache",
+            "$profile\AppData\Local\Google\Chrome\User Data\*\Code Cache",
+            "$profile\AppData\Local\Google\Chrome\User Data\*\GPUCache",
+            "$profile\AppData\Local\Microsoft\Edge\User Data\*\Cache",
+            "$profile\AppData\Local\Microsoft\Edge\User Data\*\Code Cache",
+            "$profile\AppData\Local\Microsoft\Edge\User Data\*\GPUCache",
+            "$profile\AppData\Local\BraveSoftware\Brave-Browser\User Data\*\Cache",
+            "$profile\AppData\Local\BraveSoftware\Brave-Browser\User Data\*\Code Cache",
+            "$profile\AppData\Local\Mozilla\Firefox\Profiles\*\cache2"
+        )
+        foreach ($target in $targets) { Remove-PatternSafe $target "Cache navegador: $target" }
+    }
+}
+
+Clear-DirectorySafe "$env:WINDIR\Temp" 'Temporarios do Windows'
+Clear-DirectorySafe "$env:ProgramData\Microsoft\Windows\WER\ReportArchive" 'Relatorios de erros arquivados'
+Clear-DirectorySafe "$env:ProgramData\Microsoft\Windows\WER\ReportQueue" 'Fila de relatorios de erros'
+Clear-DirectorySafe "$env:ProgramData\CrashDumps" 'CrashDumps do sistema'
+Clear-DirectorySafe "$env:WINDIR\Minidump" 'Minidumps'
+Remove-PatternSafe "$env:SystemRoot\MEMORY.DMP" 'Dump de memoria principal'
+
+# Lixeira: mede antes e depois, sem apagar arquivos fora dela.
+$recyclePath = "$env:SystemDrive\`$Recycle.Bin"
+$recycleBefore = Get-ItemSize $recyclePath
+if ($DryRun) {
+    Add-Result 'Lixeira' $recycleBefore 0 'Simulacao'
+} else {
+    Clear-RecycleBin -Force
+    $recycleAfter = Get-ItemSize $recyclePath
+    Add-Result 'Lixeira' $recycleBefore $recycleAfter 'Concluido'
+}
+
+# Fila de impressao.
+$spool = "$env:WINDIR\System32\spool\PRINTERS"
+$spoolWasRunning = (Get-Service Spooler).Status -eq 'Running'
+if (-not $DryRun) { Stop-Service Spooler -Force }
+Clear-DirectorySafe $spool 'Fila de impressao'
+if (-not $DryRun -and $spoolWasRunning) { Start-Service Spooler }
+
+# Limpa somente arquivos baixados do Windows Update e Delivery Optimization.
+# Nao apaga DataStore, Catroot2 nem historico de atualizacoes.
+if ($IncludeWindowsUpdateCache) {
+    $serviceStates = @{}
+    foreach ($name in @('wuauserv','bits','dosvc')) {
+        $svc = Get-Service $name
+        if ($svc) {
+            $serviceStates[$name] = $svc.Status
+            if (-not $DryRun -and $svc.Status -eq 'Running') { Stop-Service $name -Force }
+        }
+    }
+
+    Clear-DirectorySafe "$env:WINDIR\SoftwareDistribution\Download" 'Downloads do Windows Update'
+    Clear-DirectorySafe "$env:ProgramData\Microsoft\Windows\DeliveryOptimization\Cache" 'Cache Delivery Optimization'
+
+    if (-not $DryRun) {
+        foreach ($name in $serviceStates.Keys) {
+            if ($serviceStates[$name] -eq 'Running') { Start-Service $name }
+        }
+    }
+}
+
+# Executa todas as categorias registradas no recurso Limpeza de Disco.
+# Use -SkipDiskCleanup somente quando nao quiser executar esta etapa.
+if (-not $SkipDiskCleanup) {
+    Invoke-AllDiskCleanupCategories
+}
+
+# Limpeza oficial e segura do armazenamento de componentes, sem /ResetBase.
+if ($RunComponentCleanup) {
+    if ($DryRun) {
+        $script:Report.Add([pscustomobject]@{ Item='DISM StartComponentCleanup'; Liberado='Nao calculado'; Bytes=0L; Status='Simulacao' }) | Out-Null
+    } else {
+        Write-Host 'Executando limpeza oficial do armazenamento de componentes...' -ForegroundColor Yellow
+        $beforeDism = Get-FreeSpace
+        & Dism.exe /Online /Cleanup-Image /StartComponentCleanup
+        $afterDism = Get-FreeSpace
+        $freedDism = [Math]::Max(0L, ($afterDism - $beforeDism))
+        $script:MeasuredFreed += $freedDism
+        $script:Report.Add([pscustomobject]@{ Item='DISM StartComponentCleanup'; Liberado=(Format-Bytes $freedDism); Bytes=$freedDism; Status='Concluido' }) | Out-Null
+    }
+}
+
+if (-not $DryRun) { ipconfig /flushdns | Out-Null }
+
+Start-Sleep -Seconds 2
+$freeAfter = Get-FreeSpace
+$realFreed = if ($DryRun) { 0L } else { [Math]::Max(0L, ($freeAfter - $freeBefore)) }
+$end = Get-Date
+
+Write-Host "`n================ RELATORIO ================" -ForegroundColor Cyan
+$script:Report | Sort-Object Bytes -Descending | Select-Object Item, Liberado, Status | Format-Table -AutoSize
+
+$summary = @"
+LIMPEZA UNIFICADA SEGURA
+Inicio: $($start.ToString('dd/MM/yyyy HH:mm:ss'))
+Fim: $($end.ToString('dd/MM/yyyy HH:mm:ss'))
+Modo: $(if ($DryRun) { 'SIMULACAO' } else { 'EXECUCAO' })
+Total identificado/liberado por item: $(Format-Bytes $script:MeasuredFreed)
+Espaco real liberado no disco: $(Format-Bytes $realFreed)
+Espaco real liberado em GB: $([Math]::Round(($realFreed / 1GB), 2).ToString('N2')) GB
+"@
+
+Write-Host $summary -ForegroundColor Green
+
+if (-not $DryRun) {
+    $resultFile = Join-Path $logDir 'resultado_limpeza.txt'
+    $summary | Set-Content -Path $resultFile -Encoding UTF8
+    $script:Report | Sort-Object Bytes -Descending | Export-Csv -Path (Join-Path $logDir 'detalhes_limpeza.csv') -NoTypeInformation -Encoding UTF8
+    Stop-Transcript | Out-Null
+    Write-Host "Relatorio salvo em: $resultFile" -ForegroundColor Cyan
+}

@@ -1,0 +1,262 @@
+#requires -RunAsAdministrator
+
+$ErrorActionPreference = "SilentlyContinue"
+
+Write-Host "========================================"
+Write-Host " REMOÇÃO COMPLETA DO CCLEANER"
+Write-Host "========================================"
+
+# Encerra processos relacionados
+$processos = @(
+    "CCleaner",
+    "CCleaner64",
+    "CCleanerBrowser",
+    "CCleanerPerformanceOptimizerService",
+    "CCleanerReactivator",
+    "CCleanerUpdate",
+    "CCUpdate"
+)
+
+foreach ($processo in $processos) {
+    Stop-Process -Name $processo -Force -ErrorAction SilentlyContinue
+}
+
+# Localiza instalações registradas
+$chavesUninstall = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+)
+
+$programas = Get-ItemProperty $chavesUninstall -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.DisplayName -match "CCleaner|Piriform"
+    }
+
+foreach ($programa in $programas) {
+    Write-Host "Desinstalando: $($programa.DisplayName)"
+
+    $comando = $programa.QuietUninstallString
+
+    if (-not $comando) {
+        $comando = $programa.UninstallString
+    }
+
+    if ($comando -match "(?i)msiexec(\.exe)?\s+/[IX]\s*(\{[^}]+\})") {
+        $guid = $Matches[2]
+
+        Start-Process "msiexec.exe" `
+            -ArgumentList "/x $guid /qn /norestart" `
+            -Wait
+    }
+    elseif ($comando) {
+        if ($comando -match '^"([^"]+)"(.*)$') {
+            $executavel = $Matches[1]
+            $argumentos = $Matches[2].Trim()
+
+            if ($argumentos -notmatch "(?i)/S|/silent|/quiet") {
+                $argumentos += " /S"
+            }
+
+            Start-Process `
+                -FilePath $executavel `
+                -ArgumentList $argumentos `
+                -Wait `
+                -ErrorAction SilentlyContinue
+        }
+        else {
+            Start-Process "cmd.exe" `
+                -ArgumentList "/c $comando /S" `
+                -Wait `
+                -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Start-Sleep -Seconds 3
+
+# Executa desinstaladores locais, caso ainda existam
+$desinstaladores = @(
+    "$env:ProgramFiles\CCleaner\uninst.exe",
+    "${env:ProgramFiles(x86)}\CCleaner\uninst.exe",
+    "$env:ProgramFiles\CCleaner Browser\Application\Installer\setup.exe",
+    "${env:ProgramFiles(x86)}\CCleaner Browser\Application\Installer\setup.exe"
+)
+
+foreach ($desinstalador in $desinstaladores) {
+    if (Test-Path $desinstalador) {
+        Write-Host "Executando desinstalador: $desinstalador"
+
+        if ($desinstalador -match "CCleaner Browser") {
+            Start-Process $desinstalador `
+                -ArgumentList "--uninstall --system-level --force-uninstall" `
+                -Wait
+        }
+        else {
+            Start-Process $desinstalador `
+                -ArgumentList "/S" `
+                -Wait
+        }
+    }
+}
+
+# Para e remove serviços residuais
+$servicos = Get-CimInstance Win32_Service | Where-Object {
+    $_.Name -match "CCleaner|Piriform|CCUpdate" -or
+    $_.DisplayName -match "CCleaner|Piriform"
+}
+
+foreach ($servico in $servicos) {
+    Write-Host "Removendo serviço: $($servico.Name)"
+
+    Stop-Service -Name $servico.Name -Force -ErrorAction SilentlyContinue
+    sc.exe delete $servico.Name | Out-Null
+}
+
+# Remove tarefas agendadas
+Get-ScheduledTask -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.TaskName -match "CCleaner|Piriform" -or
+        $_.TaskPath -match "CCleaner|Piriform"
+    } |
+    ForEach-Object {
+        Write-Host "Removendo tarefa: $($_.TaskPath)$($_.TaskName)"
+
+        Unregister-ScheduledTask `
+            -TaskName $_.TaskName `
+            -TaskPath $_.TaskPath `
+            -Confirm:$false
+    }
+
+# Remove inicializações automáticas
+$chavesInicializacao = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+)
+
+foreach ($chave in $chavesInicializacao) {
+    if (Test-Path $chave) {
+        $propriedades = Get-ItemProperty $chave
+
+        foreach ($propriedade in $propriedades.PSObject.Properties) {
+            if (
+                $propriedade.Name -match "CCleaner|Piriform" -or
+                "$($propriedade.Value)" -match "CCleaner|Piriform"
+            ) {
+                Write-Host "Removendo inicialização: $($propriedade.Name)"
+
+                Remove-ItemProperty `
+                    -Path $chave `
+                    -Name $propriedade.Name `
+                    -Force
+            }
+        }
+    }
+}
+
+# Pastas residuais
+$pastas = @(
+    "$env:ProgramFiles\CCleaner",
+    "${env:ProgramFiles(x86)}\CCleaner",
+    "$env:ProgramFiles\CCleaner Browser",
+    "${env:ProgramFiles(x86)}\CCleaner Browser",
+    "$env:ProgramData\CCleaner",
+    "$env:ProgramData\Piriform",
+    "$env:LOCALAPPDATA\CCleaner",
+    "$env:LOCALAPPDATA\Piriform",
+    "$env:LOCALAPPDATA\CCleaner Browser",
+    "$env:APPDATA\CCleaner",
+    "$env:APPDATA\Piriform",
+    "$env:PUBLIC\Desktop\CCleaner.lnk",
+    "$env:USERPROFILE\Desktop\CCleaner.lnk"
+)
+
+foreach ($pasta in $pastas) {
+    if (Test-Path $pasta) {
+        Write-Host "Removendo: $pasta"
+
+        takeown.exe /F "$pasta" /R /D Y | Out-Null
+        icacls.exe "$pasta" /grant Administrators:F /T /C | Out-Null
+
+        Remove-Item $pasta -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Remove atalhos do Menu Iniciar
+$atalhos = @(
+    "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\CCleaner",
+    "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\CCleaner",
+    "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\CCleaner Browser",
+    "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\CCleaner Browser"
+)
+
+foreach ($atalho in $atalhos) {
+    Remove-Item $atalho -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# Chaves de registro residuais
+$registros = @(
+    "HKLM:\SOFTWARE\Piriform",
+    "HKLM:\SOFTWARE\CCleaner",
+    "HKLM:\SOFTWARE\WOW6432Node\Piriform",
+    "HKLM:\SOFTWARE\WOW6432Node\CCleaner",
+    "HKCU:\SOFTWARE\Piriform",
+    "HKCU:\SOFTWARE\CCleaner"
+)
+
+foreach ($registro in $registros) {
+    if (Test-Path $registro) {
+        Write-Host "Removendo registro: $registro"
+        Remove-Item $registro -Recurse -Force
+    }
+}
+
+# Remove entradas residuais de desinstalação
+foreach ($chave in $chavesUninstall) {
+    Get-ItemProperty $chave -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.DisplayName -match "CCleaner|Piriform"
+        } |
+        ForEach-Object {
+            Write-Host "Removendo entrada residual: $($_.DisplayName)"
+            Remove-Item $_.PSPath -Recurse -Force
+        }
+}
+
+# Limpa arquivos temporários relacionados
+Get-ChildItem "$env:TEMP" -Force -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.Name -match "CCleaner|Piriform"
+    } |
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+Write-Host ""
+Write-Host "Verificação final:"
+
+$restosServicos = Get-CimInstance Win32_Service | Where-Object {
+    $_.Name -match "CCleaner|Piriform|CCUpdate" -or
+    $_.DisplayName -match "CCleaner|Piriform"
+}
+
+$restosPastas = $pastas | Where-Object { Test-Path $_ }
+
+if (-not $restosServicos -and -not $restosPastas) {
+    Write-Host "Nenhum componente principal do CCleaner foi encontrado."
+}
+else {
+    if ($restosServicos) {
+        Write-Warning "Ainda existem serviços:"
+        $restosServicos |
+            Select-Object Name, DisplayName, State |
+            Format-Table -AutoSize
+    }
+
+    if ($restosPastas) {
+        Write-Warning "Ainda existem pastas ou arquivos:"
+        $restosPastas
+    }
+}
+
+Write-Host ""
+Write-Host "Reinicie o computador para concluir a remoção."

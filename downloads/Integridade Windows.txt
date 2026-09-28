@@ -1,0 +1,38 @@
+# Verificar se o script está rodando como administrador
+If (-NOT ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(`
+[Security.Principal.WindowsBuiltInRole] "Administrator"))
+{
+    Write-Host "Reabra o PowerShell como Administrador." -ForegroundColor Red
+    exit
+}
+
+# Criar diretório de logs
+$logPath = "C:\Logs"
+If (-not (Test-Path $logPath)) { New-Item -ItemType Directory -Path $logPath | Out-Null }
+
+$logFile = "$logPath\Windows_Integridade.log"
+
+Write-Host "Iniciando verificação de integridade do Windows..." -ForegroundColor Cyan
+"===== INÍCIO $(Get-Date) =====" | Out-File $logFile -Append
+
+# 1. Verificação SFC
+Write-Host "Executando SFC /SCANNOW..." -ForegroundColor Yellow
+sfc /scannow | Out-File $logFile -Append
+
+# 2. Verificação e reparo com DISM
+Write-Host "Executando DISM /CheckHealth..." -ForegroundColor Yellow
+DISM /Online /Cleanup-Image /CheckHealth | Out-File $logFile -Append
+
+Write-Host "Executando DISM /ScanHealth (pode demorar)..." -ForegroundColor Yellow
+DISM /Online /Cleanup-Image /ScanHealth | Out-File $logFile -Append
+
+Write-Host "Executando DISM /RestoreHealth (pode demorar mais)..." -ForegroundColor Yellow
+DISM /Online /Cleanup-Image /RestoreHealth | Out-File $logFile -Append
+
+Write-Host "Reexecutando SFC para correções finais..." -ForegroundColor Yellow
+sfc /scannow | Out-File $logFile -Append
+
+"===== FIM $(Get-Date) =====" | Out-File $logFile -Append
+
+Write-Host "`nProcesso concluído." -ForegroundColor Green
+Write-Host "Log salvo em: $logFile" -ForegroundColor Cyan

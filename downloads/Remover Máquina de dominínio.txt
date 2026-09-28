@@ -1,0 +1,118 @@
+#Requires -RunAsAdministrator
+
+$UsuarioLocal = "User"
+$GrupoTrabalho = "WORKGROUP"
+
+Write-Host "=== REMOÇÃO DO DOMÍNIO ===" -ForegroundColor Cyan
+
+# Verifica se o usuário local existe
+$ContaLocal = Get-LocalUser -Name $UsuarioLocal -ErrorAction SilentlyContinue
+
+if (-not $ContaLocal) {
+    Write-Host "ERRO: O usuário local '$UsuarioLocal' não existe." -ForegroundColor Red
+    Write-Host "Crie o usuário antes de executar este script."
+    pause
+    exit 1
+}
+
+# Ativa o usuário local
+Enable-LocalUser -Name $UsuarioLocal -ErrorAction SilentlyContinue
+
+# Impede expiração da conta
+Set-LocalUser -Name $UsuarioLocal `
+    -AccountNeverExpires $true `
+    -PasswordNeverExpires $true `
+    -ErrorAction SilentlyContinue
+
+# Permite uso local de conta sem senha
+$LsaPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"
+
+Set-ItemProperty `
+    -Path $LsaPath `
+    -Name "LimitBlankPasswordUse" `
+    -Type DWord `
+    -Value 0
+
+# Configura logon automático no usuário local
+$WinlogonPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+
+Set-ItemProperty -Path $WinlogonPath `
+    -Name "AutoAdminLogon" `
+    -Type String `
+    -Value "1"
+
+Set-ItemProperty -Path $WinlogonPath `
+    -Name "ForceAutoLogon" `
+    -Type String `
+    -Value "1"
+
+Set-ItemProperty -Path $WinlogonPath `
+    -Name "DefaultUserName" `
+    -Type String `
+    -Value $UsuarioLocal
+
+Set-ItemProperty -Path $WinlogonPath `
+    -Name "DefaultDomainName" `
+    -Type String `
+    -Value $env:COMPUTERNAME
+
+Set-ItemProperty -Path $WinlogonPath `
+    -Name "DefaultPassword" `
+    -Type String `
+    -Value ""
+
+# Desativa tela de aviso legal, caso esteja configurada pelo domínio
+$SystemPolicyPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+
+Set-ItemProperty -Path $SystemPolicyPath `
+    -Name "LegalNoticeCaption" `
+    -Type String `
+    -Value "" `
+    -ErrorAction SilentlyContinue
+
+Set-ItemProperty -Path $SystemPolicyPath `
+    -Name "LegalNoticeText" `
+    -Type String `
+    -Value "" `
+    -ErrorAction SilentlyContinue
+
+# Verifica se o computador está realmente no domínio
+$Sistema = Get-CimInstance Win32_ComputerSystem
+
+if (-not $Sistema.PartOfDomain) {
+    Write-Host "O computador já está fora do domínio." -ForegroundColor Yellow
+    Write-Host "Reiniciando para testar o logon automático..."
+    Restart-Computer -Force
+    exit
+}
+
+Write-Host ""
+Write-Host "Domínio atual: $($Sistema.Domain)" -ForegroundColor Yellow
+Write-Host "Será solicitada uma conta autorizada a remover a máquina do domínio."
+Write-Host "Exemplo: DOMINIO\Administrador" -ForegroundColor Yellow
+
+$CredencialDominio = Get-Credential `
+    -Message "Informe uma conta com permissão para remover esta máquina do domínio"
+
+try {
+    Remove-Computer `
+        -UnjoinDomainCredential $CredencialDominio `
+        -WorkgroupName $GrupoTrabalho `
+        -Force `
+        -PassThru `
+        -ErrorAction Stop
+
+    Write-Host ""
+    Write-Host "Máquina removida do domínio com sucesso." -ForegroundColor Green
+    Write-Host "O Windows será reiniciado em 10 segundos e deverá entrar automaticamente em .\User."
+
+    shutdown.exe /r /t 10 /f /c "Computador removido do domínio. Reiniciando no usuário local User."
+}
+catch {
+    Write-Host ""
+    Write-Host "Não foi possível remover a máquina do domínio." -ForegroundColor Red
+    Write-Host "Erro: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "O computador não será reiniciado."
+    pause
+}

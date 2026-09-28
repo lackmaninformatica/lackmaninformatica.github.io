@@ -1,0 +1,220 @@
+# ============================================
+# REMOÇÃO COMPLETA DO McAFEE
+# Execute como Administrador
+# ============================================
+
+$ErrorActionPreference = "SilentlyContinue"
+
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host " REMOÇÃO COMPLETA DO McAFEE" -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Cyan
+
+# Verifica privilégios administrativos
+$admin = ([Security.Principal.WindowsPrincipal] `
+    [Security.Principal.WindowsIdentity]::GetCurrent()
+).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+if (-not $admin) {
+    Write-Host "ERRO: Execute o PowerShell como Administrador." -ForegroundColor Red
+    pause
+    exit
+}
+
+# ------------------------------------------------
+# 1. Encerrar processos McAfee
+# ------------------------------------------------
+Write-Host "`n[1/8] Encerrando processos McAfee..." -ForegroundColor Yellow
+
+Get-Process | Where-Object {
+    $_.ProcessName -match "mcafee|mcshield|mfemms|mfevtps|mfeann|masvc|macmnsvc|mcapexe|mcods|mcsacore|mfe|mcui"
+} | Stop-Process -Force
+
+# ------------------------------------------------
+# 2. Parar e remover serviços McAfee
+# ------------------------------------------------
+Write-Host "[2/8] Removendo serviços McAfee..." -ForegroundColor Yellow
+
+$services = Get-CimInstance Win32_Service | Where-Object {
+    $_.Name -match "mcafee|mfe|mcshield|masvc|macmn" -or
+    $_.DisplayName -match "McAfee"
+}
+
+foreach ($svc in $services) {
+    Write-Host "Removendo serviço: $($svc.Name)"
+    Stop-Service -Name $svc.Name -Force
+    sc.exe delete "$($svc.Name)" | Out-Null
+}
+
+# ------------------------------------------------
+# 3. Remover tarefas agendadas
+# ------------------------------------------------
+Write-Host "[3/8] Removendo tarefas agendadas..." -ForegroundColor Yellow
+
+Get-ScheduledTask | Where-Object {
+    $_.TaskName -match "McAfee|MFE" -or
+    $_.TaskPath -match "McAfee|MFE"
+} | ForEach-Object {
+    Write-Host "Removendo tarefa: $($_.TaskPath)$($_.TaskName)"
+    Unregister-ScheduledTask -TaskName $_.TaskName `
+        -TaskPath $_.TaskPath -Confirm:$false
+}
+
+# ------------------------------------------------
+# 4. Desinstalar produtos McAfee registrados
+# ------------------------------------------------
+Write-Host "[4/8] Procurando produtos McAfee instalados..." -ForegroundColor Yellow
+
+$uninstallPaths = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
+)
+
+$apps = Get-ItemProperty $uninstallPaths | Where-Object {
+    $_.DisplayName -match "McAfee|Trellix"
+}
+
+foreach ($app in $apps) {
+
+    Write-Host "Encontrado: $($app.DisplayName)" -ForegroundColor Cyan
+
+    $cmd = $app.UninstallString
+
+    if ($app.PSChildName -match "^\{.*\}$") {
+
+        Write-Host "Desinstalando via MSI..."
+        Start-Process "msiexec.exe" `
+            -ArgumentList "/x $($app.PSChildName) /qn /norestart" `
+            -Wait
+
+    }
+    elseif ($cmd) {
+
+        if ($cmd -match "MsiExec") {
+
+            $guid = [regex]::Match($cmd, '\{[A-Fa-f0-9\-]+\}').Value
+
+            if ($guid) {
+                Start-Process "msiexec.exe" `
+                    -ArgumentList "/x $guid /qn /norestart" `
+                    -Wait
+            }
+
+        }
+        else {
+            Write-Host "Executando desinstalador: $cmd"
+
+            try {
+                Start-Process "cmd.exe" `
+                    -ArgumentList "/c `"$cmd`"" `
+                    -Wait
+            } catch {}
+        }
+    }
+}
+
+# ------------------------------------------------
+# 5. Encerrar novamente processos restantes
+# ------------------------------------------------
+Write-Host "[5/8] Finalizando componentes restantes..." -ForegroundColor Yellow
+
+Get-Process | Where-Object {
+    $_.Path -match "McAfee|Trellix" -or
+    $_.ProcessName -match "^mfe|mcafee|mcshield|masvc|macmn"
+} | Stop-Process -Force
+
+# ------------------------------------------------
+# 6. Remover diretórios
+# ------------------------------------------------
+Write-Host "[6/8] Removendo pastas residuais..." -ForegroundColor Yellow
+
+$folders = @(
+    "$env:ProgramFiles\McAfee",
+    "${env:ProgramFiles(x86)}\McAfee",
+    "$env:ProgramData\McAfee",
+    "$env:LOCALAPPDATA\McAfee",
+    "$env:APPDATA\McAfee",
+    "$env:ProgramFiles\Trellix",
+    "${env:ProgramFiles(x86)}\Trellix",
+    "$env:ProgramData\Trellix"
+)
+
+foreach ($folder in $folders) {
+
+    if (Test-Path $folder) {
+
+        Write-Host "Apagando: $folder"
+
+        takeown.exe /F "$folder" /R /D Y | Out-Null
+        icacls.exe "$folder" /grant Administrators:F /T /C | Out-Null
+
+        Remove-Item "$folder" -Recurse -Force
+    }
+}
+
+# ------------------------------------------------
+# 7. Limpar entradas principais do Registro
+# ------------------------------------------------
+Write-Host "[7/8] Limpando Registro..." -ForegroundColor Yellow
+
+$regPaths = @(
+    "HKLM:\SOFTWARE\McAfee",
+    "HKLM:\SOFTWARE\WOW6432Node\McAfee",
+    "HKCU:\SOFTWARE\McAfee",
+    "HKLM:\SOFTWARE\Trellix",
+    "HKLM:\SOFTWARE\WOW6432Node\Trellix",
+    "HKCU:\SOFTWARE\Trellix"
+)
+
+foreach ($reg in $regPaths) {
+    if (Test-Path $reg) {
+        Write-Host "Removendo: $reg"
+        Remove-Item $reg -Recurse -Force
+    }
+}
+
+# Remove entradas de inicialização
+$runPaths = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+)
+
+foreach ($path in $runPaths) {
+
+    if (Test-Path $path) {
+
+        $properties = (Get-ItemProperty $path).PSObject.Properties
+
+        foreach ($prop in $properties) {
+
+            if (
+                $prop.Name -match "McAfee|Trellix|MFE" -or
+                "$($prop.Value)" -match "McAfee|Trellix"
+            ) {
+                Remove-ItemProperty `
+                    -Path $path `
+                    -Name $prop.Name `
+                    -Force
+            }
+        }
+    }
+}
+
+# ------------------------------------------------
+# 8. Limpar temporários
+# ------------------------------------------------
+Write-Host "[8/8] Limpando arquivos temporários..." -ForegroundColor Yellow
+
+Remove-Item "$env:TEMP\*" -Recurse -Force
+Remove-Item "C:\Windows\Temp\*" -Recurse -Force
+
+Write-Host "`n============================================" -ForegroundColor Green
+Write-Host " REMOÇÃO CONCLUÍDA" -ForegroundColor Green
+Write-Host "============================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "O computador será reiniciado em 15 segundos." -ForegroundColor Yellow
+Write-Host "Após reiniciar, confira Segurança do Windows." -ForegroundColor Yellow
+
+Start-Sleep -Seconds 15
+Restart-Computer -Force

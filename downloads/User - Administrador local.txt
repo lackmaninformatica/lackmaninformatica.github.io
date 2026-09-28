@@ -1,0 +1,42 @@
+$UserName = "User"
+
+try {
+    $user = Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue
+
+    if (-not $user) {
+        New-LocalUser -Name $UserName -NoPassword
+        Write-Host "Usuário '$UserName' criado com sucesso."
+    }
+    else {
+        Write-Host "Usuário '$UserName' já existe."
+    }
+
+    Set-LocalUser -Name $UserName -PasswordNeverExpires $true
+    Write-Host "Configuração 'senha nunca expira' aplicada."
+
+    $AdminGroup = (Get-LocalGroup | Where-Object { $_.SID -match "S-1-5-32-544" }).Name
+
+    if (-not $AdminGroup) {
+        throw "Não foi possível localizar o grupo local de administradores."
+    }
+
+    $AlreadyMember = Get-LocalGroupMember -Group $AdminGroup -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "\\$UserName$" -or $_.Name -eq $UserName }
+
+    if (-not $AlreadyMember) {
+        Add-LocalGroupMember -Group $AdminGroup -Member $UserName
+        Write-Host "Usuário '$UserName' adicionado ao grupo '$AdminGroup'."
+    }
+    else {
+        Write-Host "Usuário '$UserName' já está no grupo '$AdminGroup'."
+    }
+
+    Write-Host ""
+    Write-Host "Resumo final:"
+    Get-LocalUser -Name $UserName | Select-Object Name, Enabled, PasswordExpires
+    Write-Host ""
+    Write-Host "Membros do grupo $AdminGroup:"
+    Get-LocalGroupMember -Group $AdminGroup
+}
+catch {
+    Write-Host "Erro: $($_.Exception.Message)" -ForegroundColor Red
+}

