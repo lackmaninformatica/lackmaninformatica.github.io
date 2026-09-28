@@ -52,7 +52,6 @@ async function carregar() {
     console.error('Falha ao carregar catálogo:', error);
   }
 }
-// A origem e o renderizador do catálogo permanecem os mesmos.
 function navegar(focus = false) {
   const requested = location.hash.slice(1);
   const section = ['downloads', 'scripts', 'openspeedtest'].includes(requested) ? requested : 'home';
@@ -62,11 +61,6 @@ function navegar(focus = false) {
   const names = { home: 'Central de Suporte', downloads: 'Downloads', scripts: 'Scripts', openspeedtest: 'OpenSpeedTest' };
   document.title = `${names[section]} | Lackman Informática`;
   if (section === 'scripts') carregar();
-  if (section === 'openspeedtest' && !document.querySelector('#speedtest-frame').hasAttribute('src')) {
-    const url = new URL('/openspeedtest/', location.origin);
-    document.querySelector('#speedtest-frame').src = url.href;
-    document.querySelector('#speedtest-link').href = url.href;
-  }
   if (focus) {
     const target = section === 'home' ? document.querySelector('.navigation-card') : document.getElementById(`${section}-title`);
     target.focus({ preventScroll: true });
