@@ -56,57 +56,57 @@
         "category":  ""
     },
     {
-        "name":  "Remover MÃƒÂ¡quina de dominÃƒÂ­nio",
-        "filename":  "Remover MÃƒÂ¡quina de dominÃƒÂ­nio.txt",
-        "path":  "Remover MÃƒÂ¡quina de dominÃƒÂ­nio.txt",
+        "name":  "Remover Máquina de dominínio",
+        "filename":  "Remover Máquina de dominínio.txt",
+        "path":  "Remover Máquina de dominínio.txt",
         "type":  "Arquivo",
         "extension":  ".txt",
         "category":  ""
     },
     {
-        "name":  "RemoÃƒÂ§ÃƒÂ£o Ccleaner",
-        "filename":  "RemoÃƒÂ§ÃƒÂ£o Ccleaner.txt",
-        "path":  "RemoÃƒÂ§ÃƒÂ£o Ccleaner.txt",
+        "name":  "Remoção Ccleaner",
+        "filename":  "Remoção Ccleaner.txt",
+        "path":  "Remoção Ccleaner.txt",
         "type":  "Arquivo",
         "extension":  ".txt",
         "category":  ""
     },
     {
-        "name":  "RemoÃƒÂ§ÃƒÂ£o Chrome",
-        "filename":  "RemoÃƒÂ§ÃƒÂ£o Chrome.txt",
-        "path":  "RemoÃƒÂ§ÃƒÂ£o Chrome.txt",
+        "name":  "Remoção Chrome",
+        "filename":  "Remoção Chrome.txt",
+        "path":  "Remoção Chrome.txt",
         "type":  "Arquivo",
         "extension":  ".txt",
         "category":  ""
     },
     {
-        "name":  "RemoÃƒÂ§ÃƒÂ£o Google Drive",
-        "filename":  "RemoÃƒÂ§ÃƒÂ£o Google Drive.txt",
-        "path":  "RemoÃƒÂ§ÃƒÂ£o Google Drive.txt",
+        "name":  "Remoção Google Drive",
+        "filename":  "Remoção Google Drive.txt",
+        "path":  "Remoção Google Drive.txt",
         "type":  "Arquivo",
         "extension":  ".txt",
         "category":  ""
     },
     {
-        "name":  "RemoÃƒÂ§ÃƒÂ£o Mcafee",
-        "filename":  "RemoÃƒÂ§ÃƒÂ£o Mcafee.txt",
-        "path":  "RemoÃƒÂ§ÃƒÂ£o Mcafee.txt",
+        "name":  "Remoção Mcafee",
+        "filename":  "Remoção Mcafee.txt",
+        "path":  "Remoção Mcafee.txt",
         "type":  "Arquivo",
         "extension":  ".txt",
         "category":  ""
     },
     {
-        "name":  "RemoÃƒÂ§ÃƒÂ£o ONEDRIVE",
-        "filename":  "RemoÃƒÂ§ÃƒÂ£o ONEDRIVE.txt",
-        "path":  "RemoÃƒÂ§ÃƒÂ£o ONEDRIVE.txt",
+        "name":  "Remoção ONEDRIVE",
+        "filename":  "Remoção ONEDRIVE.txt",
+        "path":  "Remoção ONEDRIVE.txt",
         "type":  "Arquivo",
         "extension":  ".txt",
         "category":  ""
     },
     {
-        "name":  "RemoÃƒÂ§ÃƒÂ£o Panda",
-        "filename":  "RemoÃƒÂ§ÃƒÂ£o Panda.txt",
-        "path":  "RemoÃƒÂ§ÃƒÂ£o Panda.txt",
+        "name":  "Remoção Panda",
+        "filename":  "Remoção Panda.txt",
+        "path":  "Remoção Panda.txt",
         "type":  "Arquivo",
         "extension":  ".txt",
         "category":  ""
@@ -140,14 +140,6 @@
         "filename":  "User - Administrador local.txt",
         "path":  "User - Administrador local.txt",
         "type":  "Arquivo",
-        "extension":  ".txt",
-        "category":  ""
-    },
-    {
-        "name":  "Resync - DomÃ­nio",
-        "filename":  "Resync - DomÃ­nio.txt",
-        "path":  "Resync - DomÃ­nio.txt",
-        "type":  "PowerShell",
         "extension":  ".txt",
         "category":  ""
     },
