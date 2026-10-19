@@ -54,20 +54,38 @@ async function carregar() {
 }
 function navegar(focus = false) {
   const requested = location.hash.slice(1);
-  const section = ['downloads', 'scripts', 'openspeedtest'].includes(requested) ? requested : 'home';
+  const platform = requested === 'downloads/windows' ? 'windows' : requested === 'downloads/linux' ? 'linux' : null;
+  const section = platform ? 'downloads' : ['downloads', 'scripts', 'openspeedtest'].includes(requested) ? requested : 'home';
   for (const id of ['home', 'downloads', 'scripts', 'openspeedtest']) {
     document.getElementById(id).hidden = id !== section;
   }
+  document.getElementById('download-systems').hidden = platform !== null;
+  document.getElementById('download-content').hidden = platform === null;
+  for (const name of ['windows', 'linux']) {
+    document.getElementById(`download-${name}`).hidden = name !== platform;
+  }
+  document.querySelectorAll('[data-platform]').forEach(link => {
+    if (link.dataset.platform === platform) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  });
   const names = { home: 'Central de Suporte', downloads: 'Downloads', scripts: 'Scripts', openspeedtest: 'OpenSpeedTest' };
-  document.title = `${names[section]} | Lackman Informática`;
-  document.querySelectorAll('[data-nav]').forEach(link => { if (link.dataset.nav === section) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current'); });
+  const platformName = platform === 'windows' ? 'Windows' : 'Linux';
+  document.title = `${platform ? `Downloads para ${platformName}` : names[section]} | Lackman Informática`;
+  document.getElementById('downloads-description').textContent = platform
+    ? `Programas e materiais para ${platformName}, com links para as fontes oficiais.`
+    : 'Escolha o sistema operacional para encontrar os programas e materiais adequados.';
+  document.querySelectorAll('[data-nav]').forEach(link => {
+    if (link.dataset.nav === section) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  });
   if (section === 'scripts') carregar();
   if (focus) {
-    const target = section === 'home' ? document.querySelector('.navigation-card') : document.getElementById(`${section}-title`);
+    const target = platform ? document.getElementById(`${platform}-downloads-title`)
+      : section === 'home' ? document.querySelector('.navigation-card')
+      : document.getElementById(`${section}-title`);
     target.focus({ preventScroll: true });
     window.scrollTo(0, 0);
   }
 }
 window.addEventListener('hashchange', () => navegar(true));
 navegar();
-
