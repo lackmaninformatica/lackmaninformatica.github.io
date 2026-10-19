@@ -60,6 +60,7 @@ function navegar(focus = false) {
   }
   const names = { home: 'Central de Suporte', downloads: 'Downloads', scripts: 'Scripts', openspeedtest: 'OpenSpeedTest' };
   document.title = `${names[section]} | Lackman Informática`;
+  document.querySelectorAll('[data-nav]').forEach(link => { if (link.dataset.nav === section) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current'); });
   if (section === 'scripts') carregar();
   if (focus) {
     const target = section === 'home' ? document.querySelector('.navigation-card') : document.getElementById(`${section}-title`);
@@ -69,3 +70,4 @@ function navegar(focus = false) {
 }
 window.addEventListener('hashchange', () => navegar(true));
 navegar();
+
