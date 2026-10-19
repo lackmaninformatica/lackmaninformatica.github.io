@@ -61,7 +61,17 @@
 </div>
 </section>
 <section id="scripts" class="support-section section-inner" aria-labelledby="scripts-title" hidden>
-<a class="back-link" href="#home">← Central de Suporte</a><p class="eyebrow">BIBLIOTECA TÉCNICA</p><div class="section-heading"><h1 id="scripts-title" tabindex="-1">Scripts<span>.</span></h1><span>Diagnóstico e manutenção</span></div><p class="section-description">Arquivos de apoio ao suporte técnico. Revise o conteúdo antes de executar.</p><ul class="tools" id="tools" aria-live="polite"></ul>
+<a class="back-link" href="#home">← Central de Suporte</a><p class="eyebrow">BIBLIOTECA TÉCNICA</p><div class="section-heading"><h1 id="scripts-title" tabindex="-1">Scripts<span>.</span></h1><span>Diagnóstico e manutenção</span></div><p class="section-description" id="scripts-description">Escolha o sistema operacional para encontrar os scripts adequados.</p>
+<div id="script-systems" class="tools program-grid" aria-label="Sistemas operacionais dos scripts">
+<a class="tool os-card" href="#scripts/windows"><span class="os-symbol windows-symbol" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M5 7h17v15H5zm21 0h17v15H26zM5 26h17v15H5zm21 0h17v15H26z"/></svg></span><h2>Windows</h2><p>Scripts de diagnóstico, manutenção e administração para Windows.</p><span class="os-action">Ver scripts <svg aria-hidden="true"><use href="#i-arrow"/></svg></span></a>
+<a class="tool os-card" href="#scripts/linux"><span class="os-symbol linux-symbol" aria-hidden="true"><svg viewBox="0 0 48 48"><use href="#i-terminal"/></svg></span><h2>Linux</h2><p>Scripts de diagnóstico, manutenção e administração para Linux.</p><span class="os-action">Ver scripts <svg aria-hidden="true"><use href="#i-arrow"/></svg></span></a>
+</div>
+<div id="script-content" hidden>
+<nav class="platform-nav" aria-label="Escolher sistema dos scripts"><a href="#scripts" class="platform-all">← Todos os sistemas</a><a href="#scripts/windows" data-script-platform="windows">Windows</a><a href="#scripts/linux" data-script-platform="linux">Linux</a></nav>
+<h2 class="platform-title" id="scripts-platform-title" tabindex="-1"></h2>
+<p class="section-description">Arquivos de apoio ao suporte técnico. Revise o conteúdo antes de executar.</p>
+<ul class="tools" id="tools" aria-live="polite" aria-label="Scripts disponíveis"></ul>
+</div>
 </section>
 <section id="openspeedtest" class="support-section section-inner" aria-labelledby="openspeedtest-title" hidden>
 <a class="back-link" href="#home">← Central de Suporte</a><p class="eyebrow">FERRAMENTAS DE REDE</p><div class="section-heading"><h1 id="openspeedtest-title" tabindex="-1">Teste de velocidade<span>.</span></h1></div><div class="speedtest-card"><svg class="shortcut-icon" aria-hidden="true"><use href="#i-speed"/></svg><h2>OpenSpeedTest</h2><p>Verifique a velocidade da sua conexão com a Internet.<br>O teste abre no site oficial, em uma nova guia.</p><a id="speedtest-link" class="download" href="https://openspeedtest.com/" target="_blank" rel="noopener noreferrer">Abrir OpenSpeedTest ↗</a></div>

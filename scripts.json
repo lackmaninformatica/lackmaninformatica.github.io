@@ -5,7 +5,8 @@
     "path": "Anydesk.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "Disco 100%",
@@ -13,7 +14,8 @@
     "path": "Disco 100%.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "Executa Windows UPDATE",
@@ -21,7 +23,8 @@
     "path": "Executa Windows UPDATE.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "Integridade Windows",
@@ -29,7 +32,8 @@
     "path": "Integridade Windows.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "Limpeza-Unificada-Segura-Completa",
@@ -37,7 +41,8 @@
     "path": "Limpeza-Unificada-Segura-Completa.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "NICTEAM",
@@ -45,7 +50,8 @@
     "path": "NICTEAM.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "Rede windows 11 libera SMB",
@@ -53,7 +59,8 @@
     "path": "Rede windows 11 libera SMB.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "Remover Máquina de dominínio",
@@ -61,7 +68,8 @@
     "path": "Remover Máquina de dominínio.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "Remoção Ccleaner",
@@ -69,7 +77,8 @@
     "path": "Remoção Ccleaner.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "Remoção Chrome",
@@ -77,7 +86,8 @@
     "path": "Remoção Chrome.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "Remoção Google Drive",
@@ -85,7 +95,8 @@
     "path": "Remoção Google Drive.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "Remoção Mcafee",
@@ -93,7 +104,8 @@
     "path": "Remoção Mcafee.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "Remoção ONEDRIVE",
@@ -101,7 +113,8 @@
     "path": "Remoção ONEDRIVE.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "Remoção Panda",
@@ -109,7 +122,8 @@
     "path": "Remoção Panda.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "Reparo menu iniciar",
@@ -117,7 +131,8 @@
     "path": "Reparo menu iniciar.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "SMB Windows 11 OK",
@@ -125,7 +140,8 @@
     "path": "SMB Windows 11 OK.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "Speedtest Server",
@@ -133,7 +149,8 @@
     "path": "Speedtest Server.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "User - Administrador local",
@@ -141,7 +158,8 @@
     "path": "User - Administrador local.txt",
     "type": "Arquivo",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "Resync - Domínio",
@@ -149,7 +167,8 @@
     "path": "Resync - Domínio.txt",
     "type": "PowerShell",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   },
   {
     "name": "Reparo de Perfil AD",
@@ -157,6 +176,7 @@
     "path": "Reparo de Perfil AD.txt",
     "type": "PowerShell",
     "extension": ".txt",
-    "category": ""
+    "category": "",
+    "platform": "windows"
   }
 ]
