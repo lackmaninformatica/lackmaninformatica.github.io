@@ -1,0 +1,328 @@
+﻿# REPARO DE PERFIL AD - script PowerShell distribuido em TXT.
+# Salve este conteudo como Reparo-Perfil-AD.ps1, sem as cercas de Markdown.
+# Execute no Windows PowerShell 5.1 64 bits como administrador:
+# .\Reparo-Perfil-AD.ps1 -DeepScan
+# Somente diagnostico: .\Reparo-Perfil-AD.ps1 -Repair None
+# Nao solicita senhas; nao contem conta ou dominio fixos.
+# Reparo automatico restrito: inicia ProfSvc e restaura SID.bak isolado.
+# Sem TargetSid, exige exatamente um candidato do dominio detectado.
+# Nao substitui SID existente, nao altera pastas/ACL/GPO e nao reinicia.
+# O usuario afetado deve estar desconectado. Nao encerra sessoes.
+# Backup .reg contem identificadores reais: nao compartilhe.
+# Nao garante corrigir causas fora das regras implementadas.
+# A validacao final depende do proximo logon; verificacoes nao sao reparos.
+#requires -Version 5.1
+<# v2: AutoRepair por padrao, sem perguntas. Use -Repair None para somente diagnostico.
+Nao executa sc_verify (pode reconstruir canal), reparo DISM/SFC ou chkdsk /f.
+Nao carrega hives. Le apenas assinatura regf no reparo. Nao exporta tickets ou eventos brutos.
+#>
+[CmdletBinding()]
+param(
+ [string]$OutputRoot = (Join-Path $env:LOCALAPPDATA 'DiagnosticoLogon'),
+ [ValidateRange(1,90)][int]$Days = 7,
+ [switch]$DeepScan,
+ [ValidateSet('None','Auto')][string]$Repair = 'Auto',
+ [ValidatePattern('^(|S-1-5-21-\d+-\d+-\d+-\d+)$')][string]$TargetSid = ''
+)
+Set-StrictMode -Version 2
+$ErrorActionPreference = 'Stop'
+$id = [Security.Principal.WindowsIdentity]::GetCurrent()
+$admin = (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $admin) { throw 'Abra Windows PowerShell como administrador. Nenhuma elevacao automatica sera feita.' }
+if (-not [Environment]::Is64BitProcess) { throw 'Use Windows PowerShell de 64 bits.' }
+$run = Join-Path $OutputRoot ('Run-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,6))
+New-Item -ItemType Directory -Path $run -Force | Out-Null
+# Protege apenas a nova pasta de resultados, sem alterar ACL de perfis.
+$acl = New-Object Security.AccessControl.DirectorySecurity
+$acl.SetAccessRuleProtection($true,$false)
+foreach ($sid in @($id.User.Value,'S-1-5-18','S-1-5-32-544')) {
+ $rule = New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($sid)),'FullControl','ContainerInherit,ObjectInherit','None','Allow')
+ $acl.AddAccessRule($rule)
+}
+Set-Acl -LiteralPath $run -AclObject $acl
+$script:secrets = New-Object 'System.Collections.Generic.List[string]'
+foreach ($s in @($env:COMPUTERNAME,$env:USERDOMAIN,$env:USERNAME,$env:USERDNSDOMAIN,$id.Name)) { if ($s) { $script:secrets.Add($s) } }
+$script:records = New-Object 'System.Collections.Generic.List[object]'
+$script:sidAliases=@{}
+function Hide-Data([string]$Text) {
+ foreach ($s in ($script:secrets | Sort-Object Length -Descending -Unique)) { $Text = [regex]::Replace($Text,[regex]::Escape($s),'[IDENTIDADE]','IgnoreCase') }
+ $Text = [regex]::Replace($Text,'S-1-5-21-(?:\d+-)*\d+', { param($m) if (-not $script:sidAliases.ContainsKey($m.Value)) { $script:sidAliases[$m.Value]='SID-' + ($script:sidAliases.Count+1) }; $script:sidAliases[$m.Value] })
+ $Text = [regex]::Replace($Text,'(?i)[A-Z]:[\\/]+Users[\\/]+[^\s";,]+','[CAMINHO-PERFIL]')
+ $Text = [regex]::Replace($Text,'\b(?:\d{1,3}\.){3}\d{1,3}\b','[IP]')
+ $Text = [regex]::Replace($Text,'(?i)\b[0-9a-f]{0,4}:(?:[0-9a-f]{0,4}:)+[0-9a-f:]+(?:%\d+)?','[IPv6]')
+ $Text = [regex]::Replace($Text,'(?i)\b[a-z0-9_-]+(?:\.[a-z0-9_-]+)*\.[a-z][a-z0-9_-]*\b','[NOME-REDE]')
+ return $Text
+}
+function Protect-Value($Value) {
+ if ($null -eq $Value) { return $null }
+ if ($Value -is [string]) { return (Hide-Data $Value) }
+ if ($Value -is [datetime]) { return $Value.ToString('o') }
+ if ($Value -is [System.Collections.IDictionary]) {
+  $o=[ordered]@{}; foreach ($k in $Value.Keys) { $o[$k]=Protect-Value $Value[$k] }; return $o
+ }
+ if ($Value -is [System.Collections.IEnumerable]) {
+  $items=@(foreach ($v in $Value) { Protect-Value $v }); return ,$items
+ }
+ if ($Value -is [ValueType]) { return $Value }
+ $o=[ordered]@{}
+ foreach ($prop in $Value.PSObject.Properties) { if ($prop.IsGettable) { $o[$prop.Name]=Protect-Value $prop.Value } }
+ return $o
+}
+function Get-RepairDecision($Evidence) {
+ foreach ($name in @('DomainMatches','AccountResolved','Offline','HiveExclusive','PathSafe','NoConflict','BackupReady')) {
+  if (-not $Evidence[$name]) { return [pscustomobject]@{Allowed=$false;Reason=$name} }
+ }
+ [pscustomobject]@{Allowed=$true;Reason='BAK-orphan-confirmado'}
+}
+function Get-ComputerDomainSid($Domain=$null) {
+ $owned=($null -eq $Domain)
+ if ($owned) { $Domain=[DirectoryServices.ActiveDirectory.Domain]::GetComputerDomain() }
+ $entry=$null
+ try {
+  $entry=$Domain.GetDirectoryEntry()
+  return (New-Object Security.Principal.SecurityIdentifier([byte[]]$entry.Properties['objectSid'][0],0)).Value
+ } finally { if ($entry) { $entry.Dispose() }; if ($owned) { $Domain.Dispose() } }
+}
+function Move-ProfileKey([string]$Bak,[string]$Key,[string]$Sid,[string]$ExpectedPath) {
+ Rename-Item -LiteralPath $Bak -NewName $Sid
+ try {
+  $after=Get-ItemProperty -LiteralPath $Key
+  if ($after.ProfileImagePath -ne $ExpectedPath -or (Test-Path -LiteralPath $Bak)) { throw 'Falha na verificacao apos reparo.' }
+ } catch {
+  if ((Test-Path $Key) -and -not (Test-Path $Bak)) { Rename-Item -LiteralPath $Key -NewName ($Sid+'.bak') }
+  throw
+ }
+}
+function Assert-TargetOffline([string]$Sid) {
+ if ($Sid -eq $id.User.Value) { throw 'Usuario alvo executando o script.' }
+ if (Test-Path -LiteralPath "Registry::HKEY_USERS\$Sid") { throw 'Hive do alvo carregado.' }
+ if (Test-Path -LiteralPath "Registry::HKEY_USERS\${Sid}_Classes") { throw 'Hive Classes do alvo carregado.' }
+ $p=@(Get-CimInstance Win32_UserProfile | Where-Object SID -eq $Sid)
+ if (@($p | Where-Object Loaded).Count) { throw 'Perfil do alvo carregado.' }
+ foreach ($session in @(Get-CimInstance Win32_LoggedOnUser)) {
+  $account=Get-CimInstance -InputObject $session.Antecedent
+  if ($account.SID -eq $Sid) { throw 'Alvo possui sessao; nenhuma sessao sera encerrada.' }
+ }
+}
+function Backup-RegistryKey([string]$Key,[string]$File) {
+ $r=Native 'reg.exe' @('export',$Key,$File,'/y')
+ if ($r.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $File)) { throw 'Falha de exportacao. Nenhum reparo permitido.' }
+ $content=Get-Content -LiteralPath $File -Raw
+ if (-not $content.StartsWith('Windows Registry Editor Version 5.00') -or -not $content.Contains("[$Key]")) { throw 'Backup invalido.' }
+ if (-not $content.Contains('ProfileImagePath')) { throw 'Backup incompleto.' }
+ $hash=(Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash
+ $hash | Set-Content -LiteralPath ($File+'.sha256') -Encoding ASCII
+ if ((Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash -ne $hash) { throw 'Backup instavel.' }
+ return $hash
+}
+function Invoke-AutoRepair {
+ $svc=Get-Service ProfSvc
+ if ($svc.Status -eq 'Stopped' -and $svc.StartType -ne 'Disabled') {
+  $file=Join-Path $run 'backup-servico.json'
+  @{Name='ProfSvc';Status='Stopped';StartType=[string]$svc.StartType} | ConvertTo-Json | Set-Content $file -Encoding UTF8
+  $check=Get-Content $file -Raw | ConvertFrom-Json
+  if ($check.Name -ne 'ProfSvc' -or $check.Status -ne 'Stopped') { throw 'Backup do servico invalido.' }
+  Start-Service ProfSvc
+  (Get-Service ProfSvc).WaitForStatus('Running',[timespan]::FromSeconds(30))
+  Add-Record 'Reparo-ProfSvc' 'Aplicado' 'Servico iniciado; startup preservado.'
+ }
+ if (-not $cs.PartOfDomain) { throw 'Computador fora do dominio; reparo de perfil bloqueado.' }
+ $domainSid=Get-ComputerDomainSid
+ $sid=$TargetSid
+ if ([string]::IsNullOrWhiteSpace($sid)) {
+  $baseScan='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
+  $candidates=@(Get-ChildItem -LiteralPath $baseScan | Where-Object { $_.PSChildName -match '^S-1-5-21-\d+-\d+-\d+-\d+\.bak$' } | ForEach-Object {
+   $candidate=$_.PSChildName -replace '\.bak$',''
+   if ($candidate.StartsWith($domainSid+'-',[StringComparison]::Ordinal) -and -not (Test-Path -LiteralPath (Join-Path $baseScan $candidate))) { $candidate }
+  })
+  if ($candidates.Count -ne 1) { Add-Record 'Reparo-perfil' 'SemSelecaoUnivoca' @{CandidateCount=$candidates.Count;Reason='Sem SID alvo, exige exatamente um SID.bak isolado do dominio detectado.'}; return }
+  $sid=$candidates[0]
+ }
+ if (-not $sid.StartsWith($domainSid+'-',[StringComparison]::Ordinal)) { throw 'SID alvo nao pertence ao dominio detectado.' }
+ if ($sid -notmatch '^S-1-5-21-\d+-\d+-\d+-\d+$') { throw 'SID alvo invalido.' }
+ $base='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
+ $key=Join-Path $base $sid
+ $bak=Join-Path $base ($sid+'.bak')
+ if (-not (Test-Path -LiteralPath $bak)) { Add-Record 'Reparo-perfil' 'SemRegraAplicavel' 'Nao existe .bak para conta alvo.'; return }
+ if (Test-Path -LiteralPath $key) { Add-Record 'Reparo-perfil' 'Bloqueado' 'SID e SID.bak coexistem: conflito exige plano especifico; nada alterado.'; return }
+ Assert-TargetOffline $sid
+ $v=Get-ItemProperty -LiteralPath $bak
+ $path=[Environment]::ExpandEnvironmentVariables([string]$v.ProfileImagePath)
+ $full=[IO.Path]::GetFullPath($path).TrimEnd('\')
+ $users=[IO.Path]::GetFullPath((Join-Path $env:SystemDrive 'Users')).TrimEnd('\')
+ $pathSafe=$full.StartsWith($users+'\',[StringComparison]::OrdinalIgnoreCase) -and ((Split-Path $full -Parent) -eq $users) -and ((Split-Path $full -Leaf) -notmatch '^(TEMP(?:\..*)?|Default|Public|All Users|Default User)$')
+ if (-not $pathSafe) { throw 'Caminho do .bak fora do escopo seguro.' }
+ foreach ($itemPath in @($users,$full,(Join-Path $full 'NTUSER.DAT'))) {
+  $item=Get-Item -LiteralPath $itemPath -Force
+  if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Junction ou link: reparo bloqueado.' }
+ }
+ $owner=(Get-Acl -LiteralPath $full).GetOwner([Security.Principal.SecurityIdentifier]).Value
+ if ($owner -ne $sid) { throw 'Proprietario da pasta nao corresponde ao alvo.' }
+ $others=@(Get-ChildItem $base | Where-Object PSChildName -ne ($sid+'.bak') | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.PSObject.Properties['ProfileImagePath'] -and [Environment]::ExpandEnvironmentVariables([string]$_.ProfileImagePath).TrimEnd('\') -eq $full })
+ if ($others.Count) { throw 'Outra entrada referencia a mesma pasta.' }
+ $hive=Join-Path $full 'NTUSER.DAT'
+ if ((Get-Item -LiteralPath $hive -Force).Length -lt 4096) { throw 'Hive pequeno/invalido; sem reparo.' }
+ $handle=$null
+ try {
+  $handle=[IO.File]::Open($hive,'Open','Read','None')
+  $header=New-Object byte[] 4
+  if ($handle.Read($header,0,4) -ne 4 -or [Text.Encoding]::ASCII.GetString($header) -ne 'regf') { throw 'Assinatura de hive invalida.' }
+  $backup=Join-Path $run 'backup-perfil-RESTRITO.reg'
+  $rawKey='HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\'+$sid+'.bak'
+  $hash=Backup-RegistryKey $rawKey $backup
+  $e=@{DomainMatches=$cs.PartOfDomain;AccountResolved=$true;Offline=$true;HiveExclusive=$true;PathSafe=$pathSafe;NoConflict=$true;BackupReady=($hash.Length -eq 64)}
+  if (-not (Get-RepairDecision $e).Allowed) { throw 'Pre-condicao de reparo falhou.' }
+  Assert-TargetOffline $sid
+  if (Test-Path -LiteralPath $key) { throw 'Entrada SID apareceu durante coleta; abortado.' }
+  # Restaura apenas SID.bak orfao; preserva TODOS os valores.
+  Move-ProfileKey $bak $key $sid $v.ProfileImagePath
+  Add-Record 'Reparo-perfil' 'AplicadoNaoValidadoPorLogon' @{SID=$sid;Action='SID.bak orfao restaurado, valores e pastas preservados';RegistryBackupSHA256=$hash;Next='Proximo logon manual; outras causas podem persistir.'}
+ } finally { if ($null -ne $handle) { $handle.Dispose() } }
+}
+
+function Save-Reports {
+ $script:records | Export-Csv (Join-Path $run 'relatorio.csv') -NoTypeInformation -Encoding UTF8
+ $script:records | ConvertTo-Json -Depth 15 | Set-Content (Join-Path $run 'relatorio.json') -Encoding UTF8
+ $script:records | ForEach-Object { "$($_.Time) [$($_.State)] $($_.Section)`r`n$($_.DataJSON)`r`n" } | Set-Content (Join-Path $run 'relatorio.txt') -Encoding UTF8
+}
+function Add-Record($Section,$State,$Data) {
+ $safe = Protect-Value $Data | ConvertTo-Json -Depth 20 -Compress
+ $script:records.Add([pscustomobject]@{Time=(Get-Date).ToString('o');Section=$Section;State=$State;DataJSON=$safe})
+ Save-Reports
+ [IO.File]::AppendAllText((Join-Path $run 'execucao.log'),"$(Get-Date -Format o) $Section $State`r`n",[Text.Encoding]::UTF8)
+}
+function Collect($Name,[scriptblock]$Action) {
+ Write-Host "Coletando: $Name"
+ try {
+  $result = @(& $Action)
+  $state='Coletado'
+  if (@($result | Where-Object { $_.PSObject.Properties['ExitCode'] -and $_.ExitCode -notin @(0,3010) }).Count) { $state='FalhaComando' }
+  Add-Record $Name $state $result
+ }
+ catch { Add-Record $Name 'Indisponivel' @{ErrorType=$_.Exception.GetType().Name;HResult=$_.Exception.HResult}; Write-Warning "$Name indisponivel; consulte o relatorio." }
+}
+function Native($Exe,[string[]]$Arguments) {
+ $full=Join-Path $env:SystemRoot ('System32\' + $Exe)
+ if (-not [IO.File]::Exists($full)) { throw 'Executavel do Windows indisponivel.' }
+ $prior=$ErrorActionPreference
+ try {
+  $ErrorActionPreference='Continue'
+  $output = & $full @Arguments 2>&1 | Out-String
+  $code = $LASTEXITCODE
+ } finally { $ErrorActionPreference=$prior }
+ [pscustomobject]@{ExitCode=$code;Output=$output}
+}
+$cs = Get-CimInstance Win32_ComputerSystem
+if ($cs.Domain) { $script:secrets.Add($cs.Domain) }
+
+# Descobre nomes antes de serializar qualquer resultado.
+$profiles = @(Get-CimInstance Win32_UserProfile)
+foreach ($p in $profiles) {
+ if ($p.LocalPath) { $script:secrets.Add($p.LocalPath); $script:secrets.Add((Split-Path $p.LocalPath -Leaf)) }
+}
+Collect 'Sistema' {
+ $os = Get-CimInstance Win32_OperatingSystem
+ [pscustomobject]@{Caption=$os.Caption;Version=$os.Version;Build=$os.BuildNumber;Computer=$cs.Name;Domain=$cs.Domain;PartOfDomain=$cs.PartOfDomain;Identity=$id.Name;Elevated=$admin;LastBoot=$os.LastBootUpTime}
+ Get-Service ProfSvc,Netlogon,W32Time,gpsvc | Select-Object Name,Status,StartType
+}
+Collect 'Win32_UserProfile' {
+ $i=0
+ foreach ($p in $profiles) { $i++; [pscustomobject]@{Profile="P$i";SID=$p.SID;Path=$p.LocalPath;Loaded=$p.Loaded;Special=$p.Special;Status=$p.Status;Temporary=(($p.Status -band 1) -ne 0);Corrupt=(($p.Status -band 8) -ne 0);LastUseTime=$p.LastUseTime} }
+}
+$profileKeys = @()
+Collect 'ProfileList' {
+ $script:profileKeys = @(Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList' | ForEach-Object {
+  $v = Get-ItemProperty -LiteralPath $_.PSPath
+  [pscustomobject]@{Key=$_.PSChildName;Bak=$_.PSChildName.EndsWith('.bak');Path=($v | Select-Object -ExpandProperty ProfileImagePath -ErrorAction SilentlyContinue);State=($v | Select-Object -ExpandProperty State -ErrorAction SilentlyContinue);RefCount=($v | Select-Object -ExpandProperty RefCount -ErrorAction SilentlyContinue)}
+ })
+ $i=0
+ foreach ($k in $script:profileKeys) { $i++; [pscustomobject]@{Entry="R$i";SID=$k.Key;Bak=$k.Bak;Path=$k.Path;State=$k.State;RefCount=$k.RefCount;DuplicatePath=(@($script:profileKeys | Where-Object Path -eq $k.Path).Count -gt 1);HasBaseAndBak=(@($script:profileKeys | Where-Object { ($_.Key -replace '\.bak$','') -eq ($k.Key -replace '\.bak$','') }).Count -gt 1)} }
+}
+Collect 'ACL-e-NTUSER' {
+ $paths = @(@($profiles | ForEach-Object LocalPath) + @((Join-Path $env:SystemDrive 'Users\Default')) + @(Get-ChildItem -LiteralPath (Join-Path $env:SystemDrive 'Users') -Directory -Force | Where-Object Name -match '^TEMP(?:\..*)?$' | ForEach-Object FullName) | Where-Object { $_ } | Sort-Object -Unique)
+ $i=0
+ foreach ($path in $paths) {
+  $i++
+  foreach ($target in @($path,(Join-Path $path 'NTUSER.DAT'))) {
+   if (-not (Test-Path -LiteralPath $target)) { [pscustomobject]@{Profile="Pasta$i";Target=$target;Exists=$false}; continue }
+   try {
+    $item=Get-Item -LiteralPath $target -Force
+    $a=Get-Acl -LiteralPath $target
+    [pscustomobject]@{Profile="Pasta$i";Target=$target;Exists=$true;Length=($item | Select-Object -ExpandProperty Length -ErrorAction SilentlyContinue);Attributes=[string]$item.Attributes;OwnerOmitted=$true;Protected=$a.AreAccessRulesProtected;Rules=@($a.Access | ForEach-Object { [pscustomobject]@{PrincipalSID=$(try { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { '[NAO-RESOLVIDO]' });Rights=[string]$_.FileSystemRights;Type=[string]$_.AccessControlType;Inherited=$_.IsInherited} })}
+    if ($item.Name -eq 'NTUSER.DAT') {
+     try { $f=[IO.File]::Open($target,'Open','Read','ReadWrite,Delete'); $f.Dispose(); [pscustomobject]@{Profile="Pasta$i";ReadProbe='OK, administrador atual; nao prova acesso do usuario'} }
+     catch { [pscustomobject]@{Profile="Pasta$i";ReadProbe='Falha: pode ser bloqueio ou acesso';HResult=$_.Exception.HResult} }
+    }
+   } catch { [pscustomobject]@{Profile="Pasta$i";ACL='Indisponivel';HResult=$_.Exception.HResult} }
+  }
+ }
+}
+$since=(Get-Date).AddDays(-$Days)
+foreach ($log in @('Application','System','Microsoft-Windows-User Profile Service/Operational','Microsoft-Windows-GroupPolicy/Operational')) {
+ Collect "Eventos-$log" {
+  $filter=@{LogName=$log;StartTime=$since}
+  if ($log -eq 'Application') { $filter.ProviderName='Microsoft-Windows-User Profiles Service' }
+  if ($log -eq 'System') { $filter.Level=1,2,3 }
+  Get-WinEvent -FilterHashtable $filter -MaxEvents 500 | Select-Object TimeCreated,Id,Level,ProviderName,RecordId
+ }
+}
+Collect 'Autenticacao-eventos' {
+ Get-WinEvent -FilterHashtable @{LogName='Security';StartTime=$since;Id=4625,4771,4776} -MaxEvents 200 | Select-Object TimeCreated,Id,Level,RecordId
+}
+Collect 'DNS-config' { Get-DnsClientServerAddress | Select-Object InterfaceIndex,AddressFamily,ServerAddresses }
+Collect 'DNS-SRV' { if (-not $cs.PartOfDomain) { throw 'Sem dominio' }; Resolve-DnsName -Name "_ldap._tcp.dc._msdcs.$($cs.Domain)" -Type SRV | Select-Object Type,NameTarget,Port,Priority,Weight }
+Collect 'DC' { Native 'nltest.exe' @("/dsgetdc:$($cs.Domain)") }
+Collect 'Canal-status' { Native 'nltest.exe' @("/sc_query:$($cs.Domain)") }
+Collect 'Canal-teste' { if (-not $cs.PartOfDomain) { throw 'Sem dominio' }; Test-ComputerSecureChannel -ErrorAction Stop }
+Collect 'Kerberos' {
+ # Apenas contagem/metadados; nao salva tickets, principais ou chaves.
+ $r= & (Join-Path $env:SystemRoot 'System32\klist.exe') 2>&1 | Out-String
+ [pscustomobject]@{ExitCode=$LASTEXITCODE;TicketMarkers=([regex]::Matches($r,'(?m)^\s*#\d+>')).Count;Scope='Sessao atual; nao representa outras sessoes ou usuarios'}
+}
+Collect 'Horario' { Native 'w32tm.exe' @('/query','/status'); Native 'w32tm.exe' @('/query','/configuration'); Get-TimeZone | Select-Object Id }
+Collect 'GPO' {
+ # Saida bruta gpresult pode expor grupos, compartilhamentos e nomes de GPO.
+ $r = & (Join-Path $env:SystemRoot 'System32\gpresult.exe') /r 2>&1 | Out-String
+ [pscustomobject]@{ExitCode=$LASTEXITCODE;OutputSuppressedForPrivacy=$true;CharacterCount=$r.Length;Review='Inspecione gpresult /r localmente; nao compartilhe a saida bruta'}
+}
+Collect 'GPO-aplicadas-RSoP' {
+ foreach ($ns in @('root\RSOP\Computer',('root\RSOP\User\' + $id.User.Value.Replace('-','_')))) {
+  Get-CimInstance -Namespace $ns -ClassName RSOP_GPO | ForEach-Object { [pscustomobject]@{Scope=($ns -like '*Computer');Enabled=$_.enabled;AccessDenied=$_.accessDenied;FilterAllowed=$_.filterAllowed;NameOmitted=$true} }
+ }
+}
+Collect 'Politicas-perfil' {
+ foreach ($key in @('HKLM:\SOFTWARE\Policies\Microsoft\Windows\System','HKCU:\SOFTWARE\Policies\Microsoft\Windows\System')) {
+  if (Test-Path $key) {
+   $v=Get-ItemProperty $key
+   foreach ($name in @('DeleteRoamingCache','DeleteRoamingCacheOnLogoff','LocalProfile','SlowLinkDetectEnabled','WaitForNetwork','DisableForceUnload','CleanupProfiles','ProfileErrorAction','OnlyUseLocalProfiles')) {
+    if ($v.PSObject.Properties[$name]) { [pscustomobject]@{Scope=$key.Substring(0,4);Policy=$name;Value=$v.$name} }
+   }
+  }
+ }
+ $v=Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders'
+ foreach ($name in @('Desktop','Personal','AppData','Local AppData')) { if ($v.PSObject.Properties[$name]) { [pscustomobject]@{Folder=$name;RedirectedUNC=([string]$v.$name).StartsWith('\\');PathOmitted=$true} } }
+}
+Collect 'Disco' {
+ Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | Select-Object DeviceID,FileSystem,Size,FreeSpace,VolumeDirty
+ Get-PhysicalDisk | Select-Object MediaType,HealthStatus,OperationalStatus,Size
+ Native 'fsutil.exe' @('dirty','query',$env:SystemDrive)
+}
+Collect 'DISM-CheckHealth' { Native 'dism.exe' @('/Online','/Cleanup-Image','/CheckHealth','/English') }
+if ($DeepScan) {
+ Collect 'DISM-ScanHealth' { Native 'dism.exe' @('/Online','/Cleanup-Image','/ScanHealth','/English') }
+ Collect 'SFC-VerifyOnly' { Native 'sfc.exe' @('/verifyonly') }
+ Collect 'CHKDSK-readonly' { Native 'chkdsk.exe' @($env:SystemDrive) }
+}
+Add-Record 'Limites' 'Informacao' @('Nao determina causa raiz automaticamente. Correlacione horario e ID dos eventos com o perfil afetado.','Eventos sem mensagens/XML para minimizar exposicao. Limites: 500 por log e 200 de autenticacao.','Ausencia de eventos pode significar log desabilitado, permissao ou retencao.','ACL e leitura pelo administrador nao comprovam acesso pelo SID afetado.','GPO e HKCU representam contexto atual; validar outros usuarios separadamente.','sc_verify omitido: pode reconstruir canal. Nao executa reparo do canal.','DISM/SFC/CHKDSK podem gravar logs internos mesmo em verificacao. Nenhum reparo de componentes ou disco e executado.','Mascaramento e minimizacao nao garantem anonimato; revise antes de compartilhar.')
+Save-Reports
+if ($Repair -eq 'Auto') {
+ Collect 'Reparo-automatico' { Invoke-AutoRepair }
+ Collect 'Estado-final-ProfSvc' { Get-Service ProfSvc | Select-Object Name,Status,StartType }
+}
+Save-Reports
+Write-Host "Concluido: $run"
+Write-Host 'AplicadoNaoValidadoPorLogon nao significa logon corrigido.'
+Write-Host 'Backup .reg e restrito: contem SID/caminho reais; nao compartilhe.'
+
+
+

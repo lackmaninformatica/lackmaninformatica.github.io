@@ -150,5 +150,13 @@
     "type": "PowerShell",
     "extension": ".txt",
     "category": ""
+  },
+  {
+    "name": "Reparo de Perfil AD",
+    "filename": "Reparo de Perfil AD.txt",
+    "path": "Reparo de Perfil AD.txt",
+    "type": "PowerShell",
+    "extension": ".txt",
+    "category": ""
   }
 ]
