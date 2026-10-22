@@ -178,5 +178,14 @@
     "extension": ".txt",
     "category": "",
     "platform": "windows"
+  },
+  {
+    "name": "Ativar Entrada Automática",
+    "filename": "Ativar-Entrada-Automatica.txt",
+    "path": "Ativar-Entrada-Automatica.txt",
+    "type": "PowerShell",
+    "extension": ".txt",
+    "category": "",
+    "platform": "windows"
   }
 ]
