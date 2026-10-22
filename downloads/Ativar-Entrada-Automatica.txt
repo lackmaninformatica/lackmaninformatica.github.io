@@ -1,0 +1,77 @@
+# ATIVAR ENTRADA AUTOMATICA NO WINDOWS
+# Para uma conta LOCAL que ja esteja SEM SENHA.
+# Este script nao remove nem altera senhas.
+#
+# COMO USAR:
+# 1. Entre na conta local desejada.
+# 2. Abra o PowerShell como administrador.
+# 3. Copie e cole todo o conteudo deste arquivo e pressione Enter.
+# 4. Reinicie quando for conveniente para testar.
+#
+# Se elevou o PowerShell com OUTRA conta de administrador,
+# informe abaixo o nome da conta que deve entrar automaticamente.
+
+& {
+    $ErrorActionPreference = 'Stop'
+    try {
+        $principal = [Security.Principal.WindowsPrincipal]::new(
+            [Security.Principal.WindowsIdentity]::GetCurrent()
+        )
+        if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            throw 'Abra o PowerShell como administrador e execute novamente.'
+        }
+
+        $suggestedUser = $env:USERNAME
+        $targetUser = Read-Host "Conta LOCAL para entrada automatica [Enter = $suggestedUser]"
+        if ([string]::IsNullOrWhiteSpace($targetUser)) { $targetUser = $suggestedUser }
+        $localAccount = Get-LocalUser -Name $targetUser -ErrorAction Stop
+        if (-not $localAccount.Enabled) { throw 'A conta escolhida esta desativada.' }
+        if ($localAccount.PrincipalSource -and $localAccount.PrincipalSource.ToString() -ne 'Local') {
+            throw 'Use uma conta local, nao uma conta Microsoft ou de dominio.'
+        }
+
+        # Confirma a condicao sem pedir ou armazenar a senha da conta.
+        $confirmation = Read-Host "A conta '$targetUser' ja esta SEM SENHA? Digite SIM para continuar"
+        if ($confirmation -ine 'SIM') { throw 'Cancelado. Nenhuma configuracao foi alterada.' }
+
+        $winlogonPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+        $passwordlessPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device'
+
+        # Guarda somente os valores que este script vai alterar, para consulta.
+        $backupPath = Join-Path ([Environment]::GetFolderPath('Desktop')) (
+            'Entrada-Automatica-Backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.json'
+        )
+        $oldWinlogon = Get-ItemProperty -LiteralPath $winlogonPath
+        $oldPasswordless = Get-ItemProperty -LiteralPath $passwordlessPath -ErrorAction SilentlyContinue
+        [ordered]@{
+            Computer = $env:COMPUTERNAME
+            AutoAdminLogon = $oldWinlogon.AutoAdminLogon
+            DefaultUserName = $oldWinlogon.DefaultUserName
+            DefaultDomainName = $oldWinlogon.DefaultDomainName
+            DevicePasswordLessBuildVersion = $oldPasswordless.DevicePasswordLessBuildVersion
+        } | ConvertTo-Json | Set-Content -LiteralPath $backupPath -Encoding UTF8
+
+        New-Item -Path $passwordlessPath -Force | Out-Null
+        New-ItemProperty -LiteralPath $passwordlessPath -Name DevicePasswordLessBuildVersion -PropertyType DWord -Value 0 -Force | Out-Null
+        New-ItemProperty -LiteralPath $winlogonPath -Name DefaultUserName -PropertyType String -Value $localAccount.Name -Force | Out-Null
+        New-ItemProperty -LiteralPath $winlogonPath -Name DefaultDomainName -PropertyType String -Value $env:COMPUTERNAME -Force | Out-Null
+        New-ItemProperty -LiteralPath $winlogonPath -Name DefaultPassword -PropertyType String -Value '' -Force | Out-Null
+        Remove-ItemProperty -LiteralPath $winlogonPath -Name AutoLogonCount -ErrorAction SilentlyContinue
+        New-ItemProperty -LiteralPath $winlogonPath -Name AutoAdminLogon -PropertyType String -Value '1' -Force | Out-Null
+
+        $result = Get-ItemProperty -LiteralPath $winlogonPath
+        if ($result.AutoAdminLogon -ne '1' -or $result.DefaultUserName -ne $localAccount.Name) {
+            throw 'A verificacao dos valores gravados falhou.'
+        }
+        Write-Host "Entrada automatica configurada para $env:COMPUTERNAME\$($localAccount.Name)." -ForegroundColor Green
+        Write-Host 'Reinicie quando quiser para testar. O computador nao sera reiniciado automaticamente.'
+        Write-Host "Registro das configuracoes anteriores: $backupPath"
+        Write-Host 'Politicas de dominio/organizacao podem impedir ou reverter a entrada automatica.'
+    }
+    catch {
+        Write-Host "Nao foi possivel concluir: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+# PARA DESATIVAR depois, execute no PowerShell como administrador:
+# Set-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name AutoAdminLogon -Value '0'
