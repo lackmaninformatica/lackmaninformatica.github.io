@@ -187,5 +187,14 @@
     "extension": ".txt",
     "category": "",
     "platform": "windows"
+  },
+  {
+    "name": "Desativar Controle Inteligente de Aplicativos",
+    "filename": "Desativar-Controle-Inteligente-de-Aplicativos.txt",
+    "path": "Desativar-Controle-Inteligente-de-Aplicativos.txt",
+    "type": "PowerShell",
+    "extension": ".txt",
+    "category": "",
+    "platform": "windows"
   }
 ]
