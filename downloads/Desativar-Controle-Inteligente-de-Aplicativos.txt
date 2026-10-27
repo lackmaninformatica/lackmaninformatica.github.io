@@ -1,0 +1,39 @@
+#Requires -Version 5.1
+#Requires -RunAsAdministrator
+<#
+Desativa o Controle Inteligente de Aplicativos (Smart App Control) do Windows 11.
+Execute no PowerShell como administrador. Nao reinicia o computador.
+Ao baixar como TXT, salve como .ps1 ou cole o conteudo no PowerShell.
+#>
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+try {
+    $osVersion = [Environment]::OSVersion.Version
+    if ($osVersion.Major -lt 10 -or $osVersion.Build -lt 22000) {
+        throw 'Este script requer Windows 11.'
+    }
+    $policyPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy'
+    $valueName = 'VerifiedAndReputablePolicyState'
+    $ciTool = Join-Path $env:windir 'System32\CiTool.exe'
+    if (-not (Test-Path -LiteralPath $ciTool)) {
+        throw 'CiTool.exe nao encontrado. Nenhuma alteracao aplicada.'
+    }
+    $previous = Get-ItemPropertyValue -LiteralPath $policyPath -Name $valueName
+    Write-Host "Estado anterior no Registro: $previous (0=desativado, 1=ativado, 2=avaliacao)."
+    Set-ItemProperty -LiteralPath $policyPath -Name $valueName -Type DWord -Value 0
+    $refreshOutput = & $ciTool --refresh --json 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Configuracao salva, mas a atualizacao das politicas falhou: $refreshOutput. Reinicie e confira na Seguranca do Windows."
+    }
+    $state = (Get-MpComputerStatus).SmartAppControlState
+    if ($state -ne 'Off') {
+        throw "Configuracao salva, mas o estado atual e '$state'. Reinicie e confira na Seguranca do Windows."
+    }
+    Write-Host 'Controle Inteligente de Aplicativos desativado e verificado (Off).'
+} catch {
+    Write-Error $_
+    exit 1
+}
+
